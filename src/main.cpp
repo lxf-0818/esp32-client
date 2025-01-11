@@ -1,0 +1,134 @@
+#define BLYNK_TEMPLATE_ID "TMPL2sDJhOygV"
+#define BLYNK_TEMPLATE_NAME "House"
+#define BLYNK_AUTH_TOKEN "3plcY4yZM3HpnupyR5nmnDlUcXADV9sU"
+#include <Arduino.h>
+
+#include <FS.h>
+#include <SPIFFS.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <BlynkSimpleEsp32.h>
+#include <time.h>
+#include <CRC32.h>
+#include <Wire.h>
+#include <Adafruit_SSD1306.h>
+#define LED_BUILTIN 2
+#define INPUT_BUFFER_LIMIT 2048
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define ADC "192.168.1.180"
+#define BME "192.168.1.181"
+#define BMP "192.168.1.191"
+#define SHT "192.168.1.182"
+#define CLNT "192.168.1.179"
+#define BLYNK_PRINT Serial
+String sensorName = "NO DEVICE";
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+#define SSD_ADDR 0x3c
+void TaskBlynk(void *pvParameters);
+void flashSSD();
+int readCiphertext(char * ssid, char *psw);
+int socketRecovery (char *IP, char *cmd2Send,char *sensor) ;
+int socketClient(char *espServer, char *command, float tokens[], char *sensor, bool updateErorrQue);
+void getTemp();
+const uint16_t port = 8888;
+uint32_t blink_delay = 1000;
+uint32_t http_delay = 2000;
+uint32_t socket_delay = 50;
+float tokens[5];
+bool setAlarm = false;
+#include <Ticker.h>
+Ticker lwdTicker;
+#define LWD_TIMEOUT 15 * 1000  // Reboot if loop watchdog timer reaches this time out value
+unsigned long lwdTime = 0;
+unsigned long lwdTimeout = LWD_TIMEOUT;
+QueueHandle_t QueSocket_Handle;
+TaskHandle_t blynk_task_handle, http_task_handle, socket_task_handle;
+SemaphoreHandle_t mutex_http, mutex_sock, mutex_timer;
+const char *getRowCnt = "http://192.168.1.252/rows.php";
+//mysql includes
+WiFiClient client_sql;
+HTTPClient http;
+BlynkTimer timer;
+String apiKeyValue = "tPmAT5Ab3j7F9";
+
+
+
+void setup()
+{
+  Serial.begin(115200);
+
+  char ssid[40],pass[40];
+  char auth[] = BLYNK_AUTH_TOKEN;
+  readCiphertext(ssid,pass);
+  Blynk.begin(auth, ssid,pass);
+  bool isconnected = Blynk.connected();
+  if (isconnected == false) {
+    Serial.println("Blynk Not Connected");
+    ESP.restart();
+  } else
+    Serial.println("Blynk Connected");
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SSD_ADDR))
+    Serial.println(F("SSD1306 allocation failed"));
+  else
+    flashSSD();
+    
+
+ mutex_sock = xSemaphoreCreateMutex();
+  if (mutex_sock == NULL) {
+    Serial.println("Mutex sock can not be created");
+  }
+  xTaskCreatePinnedToCore(TaskBlynk, "Task Blink", 2048, (void *)&blink_delay, 1, &blynk_task_handle, 1);
+  
+  getTemp();
+}
+void loop()
+{
+  // put your main code here, to run repeatedly:
+}
+
+void TaskBlynk(void *pvParameters)
+{
+  uint32_t blink_delay = *((uint32_t *)pvParameters);
+  const TickType_t xDelay = blink_delay / portTICK_PERIOD_MS;
+  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.printf("Task Blink/Blynk running on coreID:%d xDelay:%lu\n", xPortGetCoreID(), xDelay);
+  for (;;)
+  {
+    digitalWrite(LED_BUILTIN, LOW);
+    vTaskDelay(xDelay);
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay(xDelay);
+  }
+}
+
+void flashSSD()
+{
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("ESP32");
+  display.println("Client PIO");
+  display.println(WiFi.localIP());
+  display.display();
+}
+void getTemp() {
+  sensorName = "BMP280";
+  if (socketClient((char *)BMP, (char *)"BMP", tokens, (char *)sensorName.c_str(), 1))  // get indoor temp
+    Serial.println("socketClient() failed");
+  else {
+    float temperature = tokens[0];
+    if ((temperature > 80) && setAlarm) {
+      Blynk.logEvent("high_temp");
+    }
+    //upDateWidget(sensorName, tokens);
+  }
+  // sensorName = "SHT35";
+  // if (socketClient((char *)SHT, (char *)"SHT", tokens, (char *)sensorName.c_str(), 1))  // get outdoor tmp
+  //   Serial.println("socketClient() failed");
+  // else
+  //   upDateWidget(sensorName, tokens);
+}
