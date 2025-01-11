@@ -12,7 +12,7 @@
 WiFiClient client;
 uint16_t port = 8888;
 String lastMsg;
-int failSocket, passSocket;
+extern int failSocket, passSocket;
 int socketRecovery(char *IP, char *cmd2Send, char *sensor);
 typedef struct
 {
@@ -93,7 +93,7 @@ int socketClient(char *espServer, char *command, float tokens[], char *sensor, b
     Serial.printf("from server crc %x\n", mycrc);
     String parsed = copyStr.substring(index + 1);
     crc.add((uint8_t *)parsed.c_str(), parsed.length());
-    if (mycrc == crc.calc())  // force
+    if (mycrc != crc.calc())  // force
     {
         Serial.println("no moatch\n");
         socketRecovery(espServer, command, sensor); // write to error recovery queque

@@ -28,65 +28,68 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SSD_ADDR 0x3c
 void TaskBlynk(void *pvParameters);
 void flashSSD();
-int readCiphertext(char * ssid, char *psw);
-int socketRecovery (char *IP, char *cmd2Send,char *sensor) ;
+void refreshWidgets();
+int readCiphertext(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, float tokens[], char *sensor, bool updateErorrQue);
 void getTemp();
 const uint16_t port = 8888;
 uint32_t blink_delay = 1000;
 uint32_t http_delay = 2000;
 uint32_t socket_delay = 50;
+int failSocket, passSocket, recoveredSocket, retry, timerID1;
+BlynkTimer timer;
 float tokens[5];
 bool setAlarm = false;
 #include <Ticker.h>
 Ticker lwdTicker;
-#define LWD_TIMEOUT 15 * 1000  // Reboot if loop watchdog timer reaches this time out value
+#define LWD_TIMEOUT 15 * 1000 // Reboot if loop watchdog timer reaches this time out value
 unsigned long lwdTime = 0;
 unsigned long lwdTimeout = LWD_TIMEOUT;
 QueueHandle_t QueSocket_Handle;
 TaskHandle_t blynk_task_handle, http_task_handle, socket_task_handle;
 SemaphoreHandle_t mutex_http, mutex_sock, mutex_timer;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
-//mysql includes
+// mysql includes
 WiFiClient client_sql;
 HTTPClient http;
-BlynkTimer timer;
 String apiKeyValue = "tPmAT5Ab3j7F9";
-
-
 
 void setup()
 {
   Serial.begin(115200);
-
-  char ssid[40],pass[40];
+  timer.enable(timerID1);
+  char ssid[40], pass[40];
   char auth[] = BLYNK_AUTH_TOKEN;
-  readCiphertext(ssid,pass);
-  Blynk.begin(auth, ssid,pass);
+  readCiphertext(ssid, pass);
+  Blynk.begin(auth, ssid, pass);
   bool isconnected = Blynk.connected();
-  if (isconnected == false) {
+  if (isconnected == false)
+  {
     Serial.println("Blynk Not Connected");
     ESP.restart();
-  } else
+  }
+  else
     Serial.println("Blynk Connected");
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD_ADDR))
     Serial.println(F("SSD1306 allocation failed"));
   else
     flashSSD();
-    
 
- mutex_sock = xSemaphoreCreateMutex();
-  if (mutex_sock == NULL) {
+  mutex_sock = xSemaphoreCreateMutex();
+  if (mutex_sock == NULL)
+  {
     Serial.println("Mutex sock can not be created");
   }
   xTaskCreatePinnedToCore(TaskBlynk, "Task Blink", 2048, (void *)&blink_delay, 1, &blynk_task_handle, 1);
-  
-  getTemp();
+
+  //  Serial.println("Turned off timer");
+  timerID1 = timer.setInterval(1000L * 20, refreshWidgets); //
 }
 void loop()
 {
-  // put your main code here, to run repeatedly:
+  Blynk.run();
+  timer.run();
 }
 
 void TaskBlynk(void *pvParameters)
@@ -115,20 +118,33 @@ void flashSSD()
   display.println(WiFi.localIP());
   display.display();
 }
-void getTemp() {
+void getTemp()
+{
   sensorName = "BMP280";
-  if (socketClient((char *)BMP, (char *)"BMP", tokens, (char *)sensorName.c_str(), 1))  // get indoor temp
+  if (socketClient((char *)BMP, (char *)"BMP", tokens, (char *)sensorName.c_str(), 1)) // get indoor temp
     Serial.println("socketClient() failed");
-  else {
+  else
+  {
     float temperature = tokens[0];
-    if ((temperature > 80) && setAlarm) {
+    if ((temperature > 80) && setAlarm)
+    {
       Blynk.logEvent("high_temp");
     }
-    //upDateWidget(sensorName, tokens);
+    // upDateWidget(sensorName, tokens);
   }
   // sensorName = "SHT35";
   // if (socketClient((char *)SHT, (char *)"SHT", tokens, (char *)sensorName.c_str(), 1))  // get outdoor tmp
   //   Serial.println("socketClient() failed");
   // else
   //   upDateWidget(sensorName, tokens);
+}
+void refreshWidgets() // called every x seconds by SimpleTimer
+{
+ 
+  getTemp();
+  // getVolt();
+  Blynk.virtualWrite(V7, passSocket);
+  Blynk.virtualWrite(V20, failSocket);
+  Blynk.virtualWrite(V19, recoveredSocket);
+  Blynk.virtualWrite(V34, retry);
 }
