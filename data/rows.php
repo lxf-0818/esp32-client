@@ -5,7 +5,7 @@ $servername = "192.168.1.252";
 $dbname = "example_esp_data";
 // Your Database user
 $username = "example_esp_board";
-// Your Database user password
+// Your Database user passwordb
 $password = "fullFat2021";
 // Create connection
 $conn = new mysqli($servername, $username, $password, $dbname);

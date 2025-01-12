@@ -61,15 +61,7 @@ void setup()
   char auth[] = BLYNK_AUTH_TOKEN;
   readCiphertext(ssid, pass);
   Blynk.begin(auth, ssid, pass);
-  bool isconnected = Blynk.connected();
-  if (isconnected == false)
-  {
-    Serial.println("Blynk Not Connected");
-    ESP.restart();
-  }
-  else
-    Serial.println("Blynk Connected");
-
+ 
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD_ADDR))
     Serial.println(F("SSD1306 allocation failed"));
   else
@@ -147,10 +139,19 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   Blynk.virtualWrite(V20, failSocket);
   Blynk.virtualWrite(V19, recoveredSocket);
   Blynk.virtualWrite(V34, retry);
-}
+  }
 BLYNK_CONNECTED()
 {
-  delay(2000);
+   bool isconnected = Blynk.connected();
+  if (isconnected == false)
+  {
+    Serial.println("Blynk Not Connected");
+    ESP.restart();
+  }
+  else
+    Serial.println("Blynk Connected");
+
+ // delay(2000);
   http.begin(getRowCnt);
   int httpResponseCode = http.GET();
   Serial.printf("httpResponseCode:%d\n", httpResponseCode);

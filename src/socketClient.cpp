@@ -81,11 +81,9 @@ int socketClient(char *espServer, char *command, float tokens[], char *sensor, b
         }
     }
     int index=0;
-    while (client.available())
-        str[index++] = client.read(); // read sensor data from sever
-    Serial.printf("data from sever %s\n", str);
-    // Close the connection
+    while (client.available()) str[index++] = client.read(); // read sensor data from sever
     client.stop();
+    // TODO: need to debug  not working 1/11/25 the server encrypted the data correctly but fails decryption on the client 
 #ifndef NO_SOCKET_AES
     decrypt_to_cleartext(str, strlen(str), enc_iv_from, cleartext);
     String copyStr = String(cleartext);
@@ -99,7 +97,7 @@ int socketClient(char *espServer, char *command, float tokens[], char *sensor, b
     index = copyStr.indexOf(":");
     String crcString = copyStr.substring(0, index);
     sscanf(crcString.c_str(), "%x", &mycrc);
-    Serial.printf("from server crc %x\n", mycrc);
+   // Serial.printf("from server crc %x\n", mycrc);
     String parsed = copyStr.substring(index + 1);
     crc.add((uint8_t *)parsed.c_str(), parsed.length());
     if (mycrc != crc.calc()) 
@@ -160,8 +158,9 @@ void taskSocketRecov(void *pvParameters)
             int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
             if (rc == pdPASS)
             {
-                //   timer.disable(timerID1);
-                //  "take" blocks calls to esp restart while messages are on queue see queStat()
+                //timer.disable(timerID1);
+
+                //"take" blocks calls to esp restart while messages are on queue see queStat()
                 xSemaphoreTake(mutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
