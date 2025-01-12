@@ -6,14 +6,15 @@
 #include <time.h>
 #include <CRC32.h>
 #include <Wire.h>
+#define NO_UPDATE_FAIL 0
 #define INPUT_BUFFER_LIMIT 2048
 #define NO_SOCKET_AES
 
-WiFiClient client;
 uint16_t port = 8888;
-String lastMsg;
-extern int failSocket, passSocket;
-int socketRecovery(char *IP, char *cmd2Send, char *sensor);
+extern String lastMsg;
+extern int failSocket, passSocket, recoveredSocket, retry;
+extern SemaphoreHandle_t mutex_sock;
+
 typedef struct
 {
     int (*fun_ptr)(char *, char *, float[], char *, bool);
@@ -23,18 +24,28 @@ typedef struct
     char sensorName[20];
 } socket_t;
 socket_t socketQue;
-extern QueueHandle_t QueSocket_Handle;
-extern char cleartext[INPUT_BUFFER_LIMIT];
-extern byte enc_iv_from[16];
-void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext);
+QueueHandle_t QueSocket_Handle;
+TaskHandle_t socket_task_handle;
+void createSocketTask();
+int socketRecovery(char *IP, char *cmd2Send, char *sensor);
+void taskSocketRecov(void *pvParameters);
+
+void createSocketTask()
+{
+    uint32_t socket_delay = 50;
+    QueSocket_Handle = xQueueCreate(20, sizeof(socket_t));
+    if (QueSocket_Handle == NULL)
+        Serial.println("Queue  socket could not be created..");
+
+    xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (void *)&socket_delay, 3, &socket_task_handle, 1);
+}
 
 int socketClient(char *espServer, char *command, float tokens[], char *sensor, bool updateErorrQue)
 {
-    int j = 0;
     uint32_t CRCfromServer;
     char str[80];
     bzero(str, 80);
-
+    WiFiClient client;
     CRC32 crc;
 
     if (!client.connect(espServer, port))
@@ -69,58 +80,52 @@ int socketClient(char *espServer, char *command, float tokens[], char *sensor, b
             return 2;
         }
     }
-
+    int index=0;
     while (client.available())
-        str[j++] = client.read(); // read sensor data from sever
+        str[index++] = client.read(); // read sensor data from sever
     Serial.printf("data from sever %s\n", str);
     // Close the connection
     client.stop();
-
 #ifndef NO_SOCKET_AES
     decrypt_to_cleartext(str, strlen(str), enc_iv_from, cleartext);
     String copyStr = String(cleartext);
     Serial.printf("clear text %x copy str %s", cleartext, copyStr);
     String copyStr = cleartext;
-
 #else
     String copyStr = str;
 #endif
     int mycrc;
     copyStr = String(copyStr);
-    int index = copyStr.indexOf(":");
+    index = copyStr.indexOf(":");
     String crcString = copyStr.substring(0, index);
     sscanf(crcString.c_str(), "%x", &mycrc);
     Serial.printf("from server crc %x\n", mycrc);
     String parsed = copyStr.substring(index + 1);
     crc.add((uint8_t *)parsed.c_str(), parsed.length());
-    if (mycrc != crc.calc())  // force
+    if (mycrc != crc.calc()) 
     {
         Serial.println("no moatch\n");
         socketRecovery(espServer, command, sensor); // write to error recovery queque
         return 3;
     }
     // crc passed !
-    // Serial.printf("crc %s str %s\n", crcString.c_str(), parsed.c_str());
     char *token = strtok((char *)parsed.c_str(), ",");
-    j = 0;
+    int j = 0;
     while (token != NULL)
     {
         tokens[j++] = atof(token);
         token = strtok(NULL, ",");
     }
-
     passSocket++;
     tokens[4] = passSocket; //
-    for (int i = 0; i < 5; i++)
-        Serial.println(tokens[i]);
+    // for (int i = 0; i < 5; i++) Serial.println(tokens[i]);
     return 0;
 }
-// This queue is  ONLY used when an error is detected in "socketClient.cpp"
-// ie The server is down or timeout waiting for sensor data from server to client
+// This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above 
+// ie The server is down or timeout waiting for sensor data from the server 
 //
 int socketRecovery(char *IP, char *cmd2Send, char *sensor)
 {
-    Serial.printf("socketRec IP %s\n", IP);
     socket_t socketQue;
     if (QueSocket_Handle == NULL)
         Serial.println("QueSocket_Handle failed");
@@ -140,4 +145,37 @@ int socketRecovery(char *IP, char *cmd2Send, char *sensor)
         return ret;
     }
     return 10;
+}
+
+void taskSocketRecov(void *pvParameters)
+{
+    socket_t socketQue;
+    uint32_t socket_delay = *((uint32_t *)pvParameters);
+    const TickType_t xDelay = socket_delay / portTICK_PERIOD_MS;
+    Serial.printf("Task Socket Recov running on coreID:%d  xDelay:%lu\n", xPortGetCoreID(), xDelay);
+    for (;;)
+    {
+        if (QueSocket_Handle != NULL)
+        {
+            int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
+            if (rc == pdPASS)
+            {
+                //   timer.disable(timerID1);
+                //  "take" blocks calls to esp restart while messages are on queue see queStat()
+                xSemaphoreTake(mutex_sock, 0);
+                vTaskDelay(xDelay);
+                retry++;
+                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd, socketQue.tokens, socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
+                if (!x)
+                {
+                    recoveredSocket++;
+                    Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
+                    Serial.printf("Recovered last network fail for host:%s cmd:%s sensor:%s\n", socketQue.ipAddr, socketQue.cmd, socketQue.sensorName);
+                }
+                else
+                    socketRecovery(socketQue.ipAddr, socketQue.cmd, socketQue.sensorName); //  ********SEND Fail to que here for recovery****
+                xSemaphoreGive(mutex_sock);
+            }
+        }
+    }
 }
