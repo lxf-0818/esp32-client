@@ -33,6 +33,8 @@ void refreshWidgets();
 int readCiphertext(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, float tokens[], char *sensor, bool updateErorrQue);
 void getTemp();
+void getBootTime();
+
 const uint16_t port = 8888;
 uint32_t blink_delay = 1000;
 uint32_t http_delay = 2000;
@@ -45,11 +47,12 @@ Ticker lwdTicker;
 #define LWD_TIMEOUT 15 * 1000 // Reboot if loop watchdog timer reaches this time out value
 unsigned long lwdTime = 0;
 unsigned long lwdTimeout = LWD_TIMEOUT;
-TaskHandle_t blynk_task_handle, http_task_handle;
-SemaphoreHandle_t mutex_http, mutex_sock, mutex_timer;
+TaskHandle_t blynk_task_handle;
+SemaphoreHandle_t mutex_http, mutex_sock;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
 // mysql includes
 WiFiClient client_sql;
+// WiFiServer server(80);
 HTTPClient http;
 String apiKeyValue = "tPmAT5Ab3j7F9";
 String lastMsg;
@@ -61,7 +64,7 @@ void setup()
   char auth[] = BLYNK_AUTH_TOKEN;
   readCiphertext(ssid, pass);
   Blynk.begin(auth, ssid, pass);
- 
+  // server.begin();
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD_ADDR))
     Serial.println(F("SSD1306 allocation failed"));
   else
@@ -139,10 +142,10 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   Blynk.virtualWrite(V20, failSocket);
   Blynk.virtualWrite(V19, recoveredSocket);
   Blynk.virtualWrite(V34, retry);
-  }
+}
 BLYNK_CONNECTED()
 {
-   bool isconnected = Blynk.connected();
+  bool isconnected = Blynk.connected();
   if (isconnected == false)
   {
     Serial.println("Blynk Not Connected");
@@ -150,8 +153,10 @@ BLYNK_CONNECTED()
   }
   else
     Serial.println("Blynk Connected");
+  getBootTime();
+  Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
 
- // delay(2000);
+  // delay(2000);
   http.begin(getRowCnt);
   int httpResponseCode = http.GET();
   Serial.printf("httpResponseCode:%d\n", httpResponseCode);

@@ -66,11 +66,10 @@ void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext
 
   for (int j = 0; j < decLen; j++)
   {
-    // Serial.printf("j=%d %d\n",j,cleartext[j]);
     if (cleartext[j] < 32)   // added lxf
     {
       cleartext[j] = '\0';
-      Serial.printf("break j=%d len =%d cleartest=%s\n",j,decLen, cleartext);
+      Serial.printf("break j=%d len =%d \n",j,decLen);
       break;
     }
   }
