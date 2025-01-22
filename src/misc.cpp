@@ -85,3 +85,4 @@ void get_reset_reason(int reason, char *strReason)
     strcpy(strReason, "NO_MEAN");
   }
 }
+

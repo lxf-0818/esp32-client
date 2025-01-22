@@ -14,13 +14,11 @@ uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 extern SemaphoreHandle_t mutex_sock;
-
 typedef struct
 {
-    int (*fun_ptr)(char *, char *, float[], char *, bool);
+    int (*fun_ptr)(char *, char *, char *, bool);
     char ipAddr[20];
     char cmd[20];
-    float tokens[5];
     char sensorName[20];
 } socket_t;
 socket_t socketQue;
@@ -40,12 +38,13 @@ void createSocketTask()
     xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (void *)&socket_delay, 3, &socket_task_handle, 1);
 }
 
-int socketClient(char *espServer, char *command, float tokens[], char *sensor, bool updateErorrQue)
+int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue)
 {
     uint32_t CRCfromServer;
     char str[80];
     bzero(str, 80);
     WiFiClient client;
+    float tokens[5][5];
     CRC32 crc;
 
     if (!client.connect(espServer, port))
@@ -80,10 +79,12 @@ int socketClient(char *espServer, char *command, float tokens[], char *sensor, b
             return 2;
         }
     }
-    int index=0;
-    while (client.available()) str[index++] = client.read(); // read sensor data from sever
+    int index = 0;
+    while (client.available())
+        str[index++] = client.read(); // read sensor data from sever
+Serial.printf("str %s\n",str);
     client.stop();
-    // TODO: need to debug  not working 1/11/25 the server encrypted the data correctly but fails decryption on the client 
+    // TODO: need to debug  not working 1/11/25 the server encrypted the data correctly but fails decryption on the client
 #ifndef NO_SOCKET_AES
     decrypt_to_cleartext(str, strlen(str), enc_iv_from, cleartext);
     String copyStr = String(cleartext);
@@ -97,30 +98,39 @@ int socketClient(char *espServer, char *command, float tokens[], char *sensor, b
     index = copyStr.indexOf(":");
     String crcString = copyStr.substring(0, index);
     sscanf(crcString.c_str(), "%x", &mycrc);
-   // Serial.printf("from server crc %x\n", mycrc);
     String parsed = copyStr.substring(index + 1);
     crc.add((uint8_t *)parsed.c_str(), parsed.length());
-    if (mycrc != crc.calc()) 
+    if (mycrc != crc.calc())
     {
         Serial.println("no moatch\n");
         socketRecovery(espServer, command, sensor); // write to error recovery queque
-        return 3;
+                                                    //   return 3;
     }
+    else 
+    Serial.println("crc passed");
     // crc passed !
     char *token = strtok((char *)parsed.c_str(), ",");
-    int j = 0;
+    int j = 0, z=0;
     while (token != NULL)
     {
-        tokens[j++] = atof(token);
+        if (!strcmp(token, "|"))
+        {
+            z++;
+            j = 0;
+        }
+        else
+            tokens[z][j++] = atof(token);
+
         token = strtok(NULL, ",");
     }
     passSocket++;
-    tokens[4] = passSocket; //
-    // for (int i = 0; i < 5; i++) Serial.println(tokens[i]);
+    // tokens[4] = passSocket; //
+     //for (int i = 0; i < 5; i++) Serial.println(tokens[0][i]);
+     // setupHTTP_request(sensor, tokens);
     return 0;
 }
-// This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above 
-// ie The server is down or timeout waiting for sensor data from the server 
+// This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above
+// ie The server is down or timeout waiting for sensor data from the server
 //
 int socketRecovery(char *IP, char *cmd2Send, char *sensor)
 {
@@ -158,13 +168,13 @@ void taskSocketRecov(void *pvParameters)
             int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
             if (rc == pdPASS)
             {
-                //timer.disable(timerID1);
+                // timer.disable(timerID1);
 
                 //"take" blocks calls to esp restart while messages are on queue see queStat()
                 xSemaphoreTake(mutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
-                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd, socketQue.tokens, socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
+                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd, socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
                 if (!x)
                 {
                     recoveredSocket++;
@@ -178,3 +188,4 @@ void taskSocketRecov(void *pvParameters)
         }
     }
 }
+

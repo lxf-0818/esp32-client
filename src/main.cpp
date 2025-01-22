@@ -16,10 +16,8 @@
 #define INPUT_BUFFER_LIMIT 2048
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
-#define ADC "192.168.1.180"
-#define BME "192.168.1.181"
-#define BMP "192.168.1.191"
-#define SHT "192.168.1.182"
+#define ROOM1 "192.168.1.181"
+#define ROOM2 "192.168.1.182"
 #define CLNT "192.168.1.179"
 #define BLYNK_PRINT Serial
 String sensorName = "NO DEVICE";
@@ -31,7 +29,7 @@ void createSocketTask();
 void flashSSD();
 void refreshWidgets();
 int readCiphertext(char *ssid, char *psw);
-int socketClient(char *espServer, char *command, float tokens[], char *sensor, bool updateErorrQue);
+int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
 void getTemp();
 void getBootTime();
 
@@ -112,36 +110,17 @@ void flashSSD()
   display.println(WiFi.localIP());
   display.display();
 }
-void getTemp()
-{
-  // get temp data from server
-  sensorName = "BMP280";
-  if (socketClient((char *)BMP, (char *)"BMP", tokens, (char *)sensorName.c_str(), 1)) // get indoor temp
-    Serial.println("socketClient() failed");
-  else
-  {
-    float temperature = tokens[0];
-    if ((temperature > 80) && setAlarm)
-    {
-      Blynk.logEvent("high_temp");
-    }
-    // upDateWidget(sensorName, tokens);
-  }
-  // sensorName = "SHT35";
-  // if (socketClient((char *)SHT, (char *)"SHT", tokens, (char *)sensorName.c_str(), 1))  // get outdoor tmp
-  //   Serial.println("socketClient() failed");
-  // else
-  //   upDateWidget(sensorName, tokens);
-}
+
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
-
-  getTemp();
-  // getVolt();
-  Blynk.virtualWrite(V7, passSocket);
-  Blynk.virtualWrite(V20, failSocket);
-  Blynk.virtualWrite(V19, recoveredSocket);
-  Blynk.virtualWrite(V34, retry);
+sensorName = "ROOM1";
+  if (socketClient((char *)ROOM1, (char *)"ALL", (char *)sensorName.c_str(), 1)) // get indoor temp
+    Serial.println("socketClient() failed");
+  
+  // Blynk.virtualWrite(V7, passSocket);
+  // Blynk.virtualWrite(V20, failSocket);
+  // Blynk.virtualWrite(V19, recoveredSocket);
+  // Blynk.virtualWrite(V34, retry);
 }
 BLYNK_CONNECTED()
 {
