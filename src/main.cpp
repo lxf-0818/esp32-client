@@ -48,8 +48,7 @@ unsigned long lwdTimeout = LWD_TIMEOUT;
 TaskHandle_t blynk_task_handle;
 SemaphoreHandle_t mutex_http, mutex_sock;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
-// mysql includes
-WiFiClient client_sql;
+
 // WiFiServer server(80);
 HTTPClient http;
 String apiKeyValue = "tPmAT5Ab3j7F9";
@@ -70,6 +69,11 @@ void setup()
 
   mutex_sock = xSemaphoreCreateMutex();
   if (mutex_sock == NULL)
+  {
+    Serial.println("Mutex sock can not be created");
+  }
+  mutex_http = xSemaphoreCreateMutex();
+  if (mutex_http == NULL)
   {
     Serial.println("Mutex sock can not be created");
   }
@@ -145,7 +149,6 @@ BLYNK_CONNECTED()
   }
   String payload = http.getString();
   Serial.println(payload);
-  passPost = payload.toInt();
-  passSocket = passPost;
+  passSocket = payload.toInt();;
   http.end();
 }

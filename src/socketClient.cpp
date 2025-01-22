@@ -9,11 +9,13 @@
 #define NO_UPDATE_FAIL 0
 #define INPUT_BUFFER_LIMIT 2048
 #define NO_SOCKET_AES
+#define MAX_LINE_LENGTH 120
 
 uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
-extern SemaphoreHandle_t mutex_sock;
+
+extern SemaphoreHandle_t mutex_sock, mutex_http;
 typedef struct
 {
     int (*fun_ptr)(char *, char *, char *, bool);
@@ -23,19 +25,38 @@ typedef struct
 } socket_t;
 socket_t socketQue;
 QueueHandle_t QueSocket_Handle;
-TaskHandle_t socket_task_handle;
+QueueHandle_t QueHTTP_Handle;
+
+typedef struct
+{
+    char device[10];
+    char line[MAX_LINE_LENGTH];
+    int key;
+} message_t;
+message_t message;
+
+TaskHandle_t socket_task_handle, http_task_handle;
 void createSocketTask();
 int socketRecovery(char *IP, char *cmd2Send, char *sensor);
 void taskSocketRecov(void *pvParameters);
+void taskSQL_HTTP(void *pvParameters);
+void setupHTTP_request(String sensorName, float tokens[]);
 
 void createSocketTask()
 {
     uint32_t socket_delay = 50;
+    uint32_t http_delay = 2000;
+
     QueSocket_Handle = xQueueCreate(20, sizeof(socket_t));
     if (QueSocket_Handle == NULL)
         Serial.println("Queue  socket could not be created..");
 
+    QueHTTP_Handle = xQueueCreate(5, sizeof(message_t));
+    if (QueHTTP_Handle == NULL)
+        Serial.println("Queue could not be created..");
+
     xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (void *)&socket_delay, 3, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(taskSQL_HTTP, "http", 2048, (void *)&http_delay, 2, &http_task_handle, 0);
 }
 
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue)
@@ -44,7 +65,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     char str[80];
     bzero(str, 80);
     WiFiClient client;
-    float tokens[5][5];
+    float tokens[5][5] = {};
     CRC32 crc;
 
     if (!client.connect(espServer, port))
@@ -82,7 +103,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     int index = 0;
     while (client.available())
         str[index++] = client.read(); // read sensor data from sever
-Serial.printf("str %s\n",str);
+    Serial.printf("str %s\n", str);
     client.stop();
     // TODO: need to debug  not working 1/11/25 the server encrypted the data correctly but fails decryption on the client
 #ifndef NO_SOCKET_AES
@@ -106,11 +127,11 @@ Serial.printf("str %s\n",str);
         socketRecovery(espServer, command, sensor); // write to error recovery queque
                                                     //   return 3;
     }
-    else 
-    Serial.println("crc passed");
+    else
+        Serial.println("crc passed");
     // crc passed !
     char *token = strtok((char *)parsed.c_str(), ",");
-    int j = 0, z=0;
+    int j = 0, z = 0;
     while (token != NULL)
     {
         if (!strcmp(token, "|"))
@@ -125,8 +146,14 @@ Serial.printf("str %s\n",str);
     }
     passSocket++;
     // tokens[4] = passSocket; //
-     //for (int i = 0; i < 5; i++) Serial.println(tokens[0][i]);
-     // setupHTTP_request(sensor, tokens);
+    // for (int i = 0; i < 5; i++) Serial.println(tokens[0][i]);
+    for (int i = 0; i < 5; i++)
+    {
+        if (tokens[i][0])
+            setupHTTP_request(sensor, tokens[i]);
+        else
+            break;
+    }
     return 0;
 }
 // This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above
@@ -188,4 +215,92 @@ void taskSocketRecov(void *pvParameters)
         }
     }
 }
+void taskSQL_HTTP(void *pvParameters)
+{
+    /*
+    The provided code represents a task function in an embedded system
+    that logs sensor data to a MySQL database using HTTP POST requests.
+    */
 
+    // This task logs the sensor data to mysql using POST()
+    HTTPClient http;
+    // mysql includes
+    WiFiClient client_sql;
+    int passPost = 0, failPost = 0, recovered = 0;
+
+    String serverName = "http://192.168.1.252/post-esp-data.php";
+    uint32_t http_delay = *((uint32_t *)pvParameters);
+    const TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
+    Serial.printf("Task Post SQL running on coreID:%d  xDelay %lu\n", xPortGetCoreID(), xDelay);
+    for (;;)
+    {
+        if (QueHTTP_Handle != NULL)
+        {
+            int ret = xQueueReceive(QueHTTP_Handle, &message, portMAX_DELAY); // wait for message
+            if (ret == pdPASS)
+            {
+                //  "take" blocks calls to esp restart while messages are on queue see queStat()
+                xSemaphoreTake(mutex_http, 0);
+                http.begin(client_sql, serverName.c_str());
+                http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+                delay(500);
+                int httpResponseCode = http.POST(message.line);
+                if (httpResponseCode > 0)
+                {
+                    passPost++;
+                    String payload = http.getString();
+                    // char *token = strtok((char *)payload.c_str(), "|");  //
+                    // int pID = atoi(token);
+                    //  if (pID != passPost)
+                    //   Serial.printf("DB corrupted pid %d  passPost %d payload %s \n", pID, passPost, payload.c_str());
+                }
+                else
+                {
+                    failPost++;
+                    int j = 0, rows = 0;
+                    while (1)
+                    {
+                        vTaskDelay(xDelay); // mysql is slow wait (non-blocking other task won't be affected)
+                        // rows = rollBack(message.key);
+                        if (rows >= 0 || j == 5)
+                            break; // if http error call back
+                        j++;
+                    }
+                    Serial.printf("rows %d\n", rows);
+                    Serial.printf("HTTP Error rc: %d %s %d \n", httpResponseCode, message.line, message.key);
+                    Serial.printf("passed %d  failed %d ", passPost, failPost);
+                    int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0); // send message back to queue
+                    if (ret == pdTRUE)
+                        recovered++;                            //
+                    Serial.printf("recoverd %d \n", recovered); // checked mySQL and the entry exists
+                }
+                http.end();
+                vTaskDelay(xDelay);
+                xSemaphoreGive(mutex_http);
+            }
+            else if (ret == pdFALSE)
+                Serial.println("The setSQL_HTTP was unable to receive data from the Queue");
+        } // Sanity check
+    }
+}
+void setupHTTP_request(String sensorName, float tokens[])
+{
+    message_t message;
+    String apiKeyValue = "tPmAT5Ab3j7F9";
+    String sensorLocation = "HOME";
+
+    if (QueHTTP_Handle != NULL && uxQueueSpacesAvailable(QueHTTP_Handle) > 0)
+    {
+
+        String httpRequestData = "api_key=" + apiKeyValue + "&sensor=" + sensorName + "&location=" + sensorLocation + "&value1=" + String(tokens[0]) + "&value2=" + String(tokens[1]) + "&value3=" + String(tokens[4]) + "";
+        strcpy(message.line, httpRequestData.c_str());
+        message.key = tokens[4];
+        message.line[strlen(message.line)] = 0; // Add the terminating nul char4
+        int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0);
+        if (ret == pdTRUE)
+        { /* Serial.println("recovering struct send to QueSocket sucessfully"); */
+        }
+        else if (ret == errQUEUE_FULL)
+            Serial.println(".......unable to send data to htpp Queue is Full");
+    }
+}
