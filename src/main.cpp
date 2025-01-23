@@ -137,7 +137,6 @@ BLYNK_CONNECTED()
   else
     Serial.println("Blynk Connected");
   getBootTime();
-  Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
 
   // delay(2000);
   http.begin(getRowCnt);
@@ -149,6 +148,8 @@ BLYNK_CONNECTED()
   }
   String payload = http.getString();
   Serial.println(payload);
-  passSocket = payload.toInt();;
+  passSocket = payload.toInt();
+  Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
+
   http.end();
 }

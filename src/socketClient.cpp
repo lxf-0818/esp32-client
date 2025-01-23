@@ -149,10 +149,22 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     // for (int i = 0; i < 5; i++) Serial.println(tokens[0][i]);
     for (int i = 0; i < 5; i++)
     {
-        if (tokens[i][0])
-            setupHTTP_request(sensor, tokens[i]);
-        else
+        switch ((int)tokens[i][0])
+        {
+        case 58:
+            setupHTTP_request("BMP", tokens[i]);
+            // upDateWidget("BM",readings[i]);
             break;
+        case 44:
+            setupHTTP_request("SHT", tokens[i]);
+            break;
+        case 48:
+            setupHTTP_request("ADC", tokens[i]);
+            break;
+        default:
+            printf("EOF ");
+            break;
+        }
     }
     return 0;
 }
@@ -288,11 +300,13 @@ void setupHTTP_request(String sensorName, float tokens[])
     message_t message;
     String apiKeyValue = "tPmAT5Ab3j7F9";
     String sensorLocation = "HOME";
+    extern int passSocket;
 
     if (QueHTTP_Handle != NULL && uxQueueSpacesAvailable(QueHTTP_Handle) > 0)
     {
 
-        String httpRequestData = "api_key=" + apiKeyValue + "&sensor=" + sensorName + "&location=" + sensorLocation + "&value1=" + String(tokens[0]) + "&value2=" + String(tokens[1]) + "&value3=" + String(tokens[4]) + "";
+        String httpRequestData = "api_key=" + apiKeyValue + "&sensor=" + sensorName + "&location=" + sensorLocation + "&value1=" +
+                                 String(tokens[1]) + "&value2=" + String(tokens[2]) + "&value3=" + String(passSocket) + "";
         strcpy(message.line, httpRequestData.c_str());
         message.key = tokens[4];
         message.line[strlen(message.line)] = 0; // Add the terminating nul char4
