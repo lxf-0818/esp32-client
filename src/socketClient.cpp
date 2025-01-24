@@ -42,6 +42,8 @@ void taskSocketRecov(void *pvParameters);
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
 
+
+
 void createSocketTask()
 {
     uint32_t socket_delay = 50;
@@ -145,25 +147,31 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
         token = strtok(NULL, ",");
     }
     passSocket++;
-    // tokens[4] = passSocket; //
     // for (int i = 0; i < 5; i++) Serial.println(tokens[0][i]);
+    bool eof = false;
     for (int i = 0; i < 5; i++)
     {
         switch ((int)tokens[i][0])
         {
         case 58:
-            setupHTTP_request("BMP", tokens[i]);
-            // upDateWidget("BM",readings[i]);
+            strcpy(sensor,"BMP");
             break;
         case 44:
-            setupHTTP_request("SHT", tokens[i]);
+            strcpy(sensor,"SHT");
             break;
         case 48:
-            setupHTTP_request("ADC", tokens[i]);
+            strcpy(sensor,"ADC");
             break;
         default:
-            printf("EOF ");
+            eof = true;
             break;
+        }
+        if (eof)
+            break;
+        else
+        {
+            setupHTTP_request(sensor, tokens[i]);
+            // upDateWidget(sensor,readings[i]);
         }
     }
     return 0;
@@ -229,10 +237,7 @@ void taskSocketRecov(void *pvParameters)
 }
 void taskSQL_HTTP(void *pvParameters)
 {
-    /*
-    The provided code represents a task function in an embedded system
-    that logs sensor data to a MySQL database using HTTP POST requests.
-    */
+   
 
     // This task logs the sensor data to mysql using POST()
     HTTPClient http;
