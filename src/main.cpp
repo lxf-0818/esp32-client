@@ -12,7 +12,6 @@
 #include <CRC32.h>
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
-#define LED_BUILTIN 2
 #define INPUT_BUFFER_LIMIT 2048
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -24,7 +23,6 @@ String sensorName = "NO DEVICE";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SSD_ADDR 0x3c
-void TaskBlynk(void *pvParameters);
 void createSocketTask();
 void flashSSD();
 void refreshWidgets();
@@ -34,8 +32,6 @@ void getTemp();
 void getBootTime();
 
 const uint16_t port = 8888;
-uint32_t blink_delay = 1000;
-uint32_t http_delay = 2000;
 int failSocket, passSocket, recoveredSocket, retry, timerID1, passPost;
 BlynkTimer timer;
 float tokens[5];
@@ -45,7 +41,6 @@ Ticker lwdTicker;
 #define LWD_TIMEOUT 15 * 1000 // Reboot if loop watchdog timer reaches this time out value
 unsigned long lwdTime = 0;
 unsigned long lwdTimeout = LWD_TIMEOUT;
-TaskHandle_t blynk_task_handle;
 SemaphoreHandle_t mutex_http, mutex_sock;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
 
@@ -77,10 +72,10 @@ void setup()
   {
     Serial.println("Mutex sock can not be created");
   }
-  xTaskCreatePinnedToCore(TaskBlynk, "Task Blink", 2048, (void *)&blink_delay, 1, &blynk_task_handle, 1);
 
   //  Serial.println("Turned off timer");
   timerID1 = timer.setInterval(1000L * 20, refreshWidgets); //
+  
   createSocketTask();
 }
 void loop()
@@ -89,20 +84,7 @@ void loop()
   timer.run();
 }
 
-void TaskBlynk(void *pvParameters)
-{
-  uint32_t blink_delay = *((uint32_t *)pvParameters);
-  const TickType_t xDelay = blink_delay / portTICK_PERIOD_MS;
-  pinMode(LED_BUILTIN, OUTPUT);
-  Serial.printf("Task Blink/Blynk running on coreID:%d xDelay:%lu\n", xPortGetCoreID(), xDelay);
-  for (;;)
-  {
-    digitalWrite(LED_BUILTIN, LOW);
-    vTaskDelay(xDelay);
-    digitalWrite(LED_BUILTIN, HIGH);
-    vTaskDelay(xDelay);
-  }
-}
+
 void flashSSD()
 {
   display.clearDisplay();
