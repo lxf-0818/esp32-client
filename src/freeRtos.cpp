@@ -37,13 +37,14 @@ typedef struct
 message_t message;
 
 TaskHandle_t socket_task_handle, http_task_handle, blink_task_handle;
-void createSocketTask();
+void initRTOS();
 int socketRecovery(char *IP, char *cmd2Send, char *sensor);
 void taskSocketRecov(void *pvParameters);
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
 void TaskBlink(void *pvParameters);
-void createSocketTask()
+
+void initRTOS()
 {
     uint32_t socket_delay = 50;
     uint32_t http_delay = 2000;
@@ -150,10 +151,13 @@ void taskSQL_HTTP(void *pvParameters)
                 int httpResponseCode = http.POST(message.line);
                 if (httpResponseCode > 0)
                 {
+
                     passPost++;
                     String payload = http.getString();
-                    // char *token = strtok((char *)payload.c_str(), "|");  //
-                    // int pID = atoi(token);
+                    char *token = strtok((char *)payload.c_str(), "|"); //
+                    int pID = atoi(token);
+                    //   Serial.printf("DB  pid %d  passPost %d payload %s \n", pID, passPost, payload.c_str());
+
                     //  if (pID != passPost)
                     //   Serial.printf("DB corrupted pid %d  passPost %d payload %s \n", pID, passPost, payload.c_str());
                 }
@@ -203,7 +207,8 @@ void setupHTTP_request(String sensorName, float tokens[])
         message.line[strlen(message.line)] = 0; // Add the terminating nul char4
         int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0);
         if (ret == pdTRUE)
-        { /* Serial.println("recovering struct send to QueSocket sucessfully"); */
+        {
+         /*  Serial.println(" msg struct send to QueSocket sucessfully"); */
         }
         else if (ret == errQUEUE_FULL)
             Serial.println(".......unable to send data to htpp Queue is Full");

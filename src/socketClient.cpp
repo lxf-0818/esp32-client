@@ -10,6 +10,7 @@
 #define INPUT_BUFFER_LIMIT 2048
 #define NO_SOCKET_AES
 #define MAX_LINE_LENGTH 120
+//#define DEBUG
 
 extern uint16_t port;
 extern String lastMsg;
@@ -18,8 +19,6 @@ void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
 int socketRecovery(char *IP, char *cmd2Send, char *sensor);
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
-
-
 
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue)
 {
@@ -87,10 +86,9 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     {
         Serial.println("no moatch\n");
         socketRecovery(espServer, command, sensor); // write to error recovery queque
-                                                    //   return 3;
+        return 3;
     }
-    else
-        Serial.println("crc passed");
+   
     // crc passed !
     char *token = strtok((char *)parsed.c_str(), ",");
     int j = 0, z = 0;
@@ -107,33 +105,33 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
         token = strtok(NULL, ",");
     }
     passSocket++;
-    // for (int i = 0; i < 5; i++) Serial.println(tokens[0][i]);
-    bool eof = false;
+#ifdef DEBUG
+    for (int i = 0; i < 5; i++)
+    {
+        for (int j = 0; j < 5; j++)
+            Serial.printf("%f ", tokens[i][j]);
+        Serial.println();
+    }
+#endif
+
     for (int i = 0; i < 5; i++)
     {
         switch ((int)tokens[i][0])
         {
         case 58:
-            strcpy(sensor,"BMP");
+            strcpy(sensor, "BMP");
             break;
         case 44:
-            strcpy(sensor,"SHT");
+            strcpy(sensor, "SHT");
             break;
         case 48:
-            strcpy(sensor,"ADC");
+            strcpy(sensor, "ADC");
             break;
         default:
-            eof = true;
-            break;
+            return 0;
         }
-        if (eof)
-            break;
-        else
-        {
-            setupHTTP_request(sensor, tokens[i]);
-            // upDateWidget(sensor,readings[i]);
-        }
+        setupHTTP_request(sensor, tokens[i]);
+        // upDateWidget(sensor,readings[i]);
     }
     return 0;
 }
-// This queue

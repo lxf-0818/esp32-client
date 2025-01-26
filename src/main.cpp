@@ -23,7 +23,7 @@ String sensorName = "NO DEVICE";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SSD_ADDR 0x3c
-void createSocketTask();
+void initRTOS();
 void flashSSD();
 void refreshWidgets();
 int readCiphertext(char *ssid, char *psw);
@@ -75,15 +75,13 @@ void setup()
 
   //  Serial.println("Turned off timer");
   timerID1 = timer.setInterval(1000L * 20, refreshWidgets); //
-  
-  createSocketTask();
+  initRTOS();
 }
 void loop()
 {
   Blynk.run();
   timer.run();
 }
-
 
 void flashSSD()
 {
@@ -99,10 +97,10 @@ void flashSSD()
 
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
-sensorName = "ROOM1";
+  sensorName = "ROOM1";
   if (socketClient((char *)ROOM1, (char *)"ALL", (char *)sensorName.c_str(), 1)) // get indoor temp
     Serial.println("socketClient() failed");
-  
+
   // Blynk.virtualWrite(V7, passSocket);
   // Blynk.virtualWrite(V20, failSocket);
   // Blynk.virtualWrite(V19, recoveredSocket);
