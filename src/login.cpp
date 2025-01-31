@@ -1,12 +1,10 @@
 #include <Arduino.h>
-#include <SPIFFS.h>
-
 #include <FS.h>
 #include <time.h>
 #include <string.h>
 #include <WiFi.h>
 #include <AESLib.h>
-
+#include <LittleFS.h>
 #define PORT 8888
 #define INPUT_BUFFER_LIMIT 2048
 AESLib aesLib;
@@ -79,14 +77,14 @@ int readCiphertext(char *ssid, char *pass)
 {
   String ssid_psw_aes;
 
-  bool success = SPIFFS.begin();
+  bool success = LittleFS.begin();
   if (!success)
   {
     Serial.println("Error mounting the file system");
     return 1;
   }
 
-  File file = SPIFFS.open("/ssid_pass_aes.txt", "r");
+  File file = LittleFS.open("/ssid_pass_aes.txt", "r");
   if (!file)
   {
     Serial.println("Failed to open ssid_pass_aes.txt file for reading");

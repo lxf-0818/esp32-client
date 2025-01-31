@@ -17,6 +17,7 @@ extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
 extern SemaphoreHandle_t mutex_sock, mutex_http;
+bool queStat();
 typedef struct
 {
     int (*fun_ptr)(char *, char *, char *, bool);
@@ -25,8 +26,6 @@ typedef struct
     char sensorName[20];
 } socket_t;
 socket_t socketQue;
-QueueHandle_t QueSocket_Handle;
-QueueHandle_t QueHTTP_Handle;
 
 typedef struct
 {
@@ -36,6 +35,8 @@ typedef struct
 } message_t;
 message_t message;
 
+QueueHandle_t QueSocket_Handle;
+QueueHandle_t QueHTTP_Handle;
 TaskHandle_t socket_task_handle, http_task_handle, blink_task_handle;
 void initRTOS();
 int socketRecovery(char *IP, char *cmd2Send, char *sensor);
@@ -103,13 +104,13 @@ void taskSocketRecov(void *pvParameters)
             int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
             if (rc == pdPASS)
             {
-                // timer.disable(timerID1);
-
-                //"take" blocks calls to esp restart while messages are on queue see queStat()
+                //"take" blocks calls to esp restart when messages are on queue
+                // see queStat()
                 xSemaphoreTake(mutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
-                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd, socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
+                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd,
+                                             socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
                 if (!x)
                 {
                     recoveredSocket++;
@@ -208,7 +209,7 @@ void setupHTTP_request(String sensorName, float tokens[])
         int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0);
         if (ret == pdTRUE)
         {
-         /*  Serial.println(" msg struct send to QueSocket sucessfully"); */
+            /*  Serial.println(" msg struct send to QueSocket sucessfully"); */
         }
         else if (ret == errQUEUE_FULL)
             Serial.println(".......unable to send data to htpp Queue is Full");
@@ -226,4 +227,31 @@ void TaskBlink(void *pvParameters)
         digitalWrite(LED_BUILTIN, HIGH);
         vTaskDelay(xDelay);
     }
+}
+bool queStat()
+{
+    unsigned long timeout = millis();
+    while (1)
+    {
+        if (millis() - timeout > 5000)
+        {
+            Serial.println(">>> Queue Timeout!");
+            return false;
+        }
+        if ((uxQueueMessagesWaiting(QueSocket_Handle) == 0) && (uxQueueMessagesWaiting(QueHTTP_Handle) == 0))
+        {
+            Serial.println("no messages on que");
+            xSemaphoreTake(mutex_http, portMAX_DELAY);
+            xSemaphoreTake(mutex_sock, portMAX_DELAY);
+            Serial.println("tasks are now complete........bye!");
+            break;
+        }
+        else
+        {
+            delay(1000);
+            Serial.println(".... que busy");
+        }
+    }
+
+    return true;
 }

@@ -28,7 +28,7 @@ void flashSSD();
 void refreshWidgets();
 int readCiphertext(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
-void getTemp();
+bool queStat();
 void getBootTime();
 
 const uint16_t port = 8888;
@@ -43,6 +43,8 @@ unsigned long lwdTime = 0;
 unsigned long lwdTimeout = LWD_TIMEOUT;
 SemaphoreHandle_t mutex_http, mutex_sock;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
+const char *deleteAll = "http://192.168.1.252/deleteALL.php";
+
 
 // WiFiServer server(80);
 HTTPClient http;
@@ -132,4 +134,19 @@ BLYNK_CONNECTED()
   Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
 
   http.end();
+}
+
+
+void ICACHE_RAM_ATTR lwdtcb(void) {
+  if ((millis() - lwdTime > LWD_TIMEOUT) || (lwdTimeout - lwdTime != LWD_TIMEOUT)) {
+    // Blynk.logEvent("3rd_WDTimer");
+    Serial.printf("3rd_WDTimer esp.restart %lu %lu\n", (millis() - lwdTime), (lwdTimeout - lwdTime));
+    Blynk.virtualWrite(V39, "3rd_WDTimer");
+    queStat();
+    ESP.restart();
+  }
+}
+void lwdtFeed(void) {
+  lwdTime = millis();
+  lwdTimeout = lwdTime + LWD_TIMEOUT;
 }

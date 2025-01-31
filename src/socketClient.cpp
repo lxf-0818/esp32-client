@@ -97,7 +97,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
         if (!strcmp(token, "|"))
         {
             z++;
-            j = 0;
+            j=0;
         }
         else
             tokens[z][j++] = atof(token);
