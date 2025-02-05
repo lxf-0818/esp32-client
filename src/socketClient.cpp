@@ -10,7 +10,7 @@
 #define INPUT_BUFFER_LIMIT 2048
 #define NO_SOCKET_AES
 #define MAX_LINE_LENGTH 120
-//#define DEBUG
+// #define DEBUG
 
 extern uint16_t port;
 extern String lastMsg;
@@ -88,23 +88,24 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
         socketRecovery(espServer, command, sensor); // write to error recovery queque
         return 3;
     }
-   
+
     // crc passed !
+    passSocket++;
     char *token = strtok((char *)parsed.c_str(), ",");
     int j = 0, z = 0;
     while (token != NULL)
     {
         if (!strcmp(token, "|"))
         {
+            passSocket++;
             z++;
-            j=0;
+            j = 0;
         }
         else
             tokens[z][j++] = atof(token);
 
         token = strtok(NULL, ",");
     }
-    passSocket++;
 #ifdef DEBUG
     for (int i = 0; i < 5; i++)
     {

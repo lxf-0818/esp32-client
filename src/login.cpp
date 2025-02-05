@@ -97,6 +97,7 @@ int readCiphertext(char *ssid, char *pass)
   file.close();
 
   decrypt_to_cleartext((char *)ssid_psw_aes.c_str(), ssid_psw_aes.length(), aes_iv, cleartext);
+  
   String temp = cleartext;
   int index = temp.indexOf(":");
   strcpy(ssid, (temp.substring(0, index)).c_str());

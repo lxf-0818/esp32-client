@@ -16,7 +16,7 @@ uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
-extern SemaphoreHandle_t mutex_sock, mutex_http;
+SemaphoreHandle_t mutex_sock, mutex_http;
 bool queStat();
 typedef struct
 {
@@ -47,9 +47,7 @@ void TaskBlink(void *pvParameters);
 
 void initRTOS()
 {
-    uint32_t socket_delay = 50;
-    uint32_t http_delay = 2000;
-    uint32_t blink_delay = 1000;
+    uint32_t socket_delay = 50,http_delay = 2000 , blink_delay = 1000;
     pinMode(LED_BUILTIN, OUTPUT);
 
     QueSocket_Handle = xQueueCreate(20, sizeof(socket_t));
@@ -63,6 +61,17 @@ void initRTOS()
     xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (void *)&socket_delay, 3, &socket_task_handle, 1);
     xTaskCreatePinnedToCore(taskSQL_HTTP, "http", 2048, (void *)&http_delay, 2, &http_task_handle, 0);
     xTaskCreatePinnedToCore(TaskBlink, "Task Blink", 2048, (void *)&blink_delay, 1, &blink_task_handle, 1);
+
+    mutex_sock = xSemaphoreCreateMutex();
+    if (mutex_sock == NULL)
+    {
+        Serial.println("Mutex sock can not be created");
+    }
+    mutex_http = xSemaphoreCreateMutex();
+    if (mutex_http == NULL)
+    {
+        Serial.println("Mutex sock can not be created");
+    }
 }
 
 // This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above

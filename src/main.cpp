@@ -33,6 +33,7 @@ void getBootTime();
 
 const uint16_t port = 8888;
 int failSocket, passSocket, recoveredSocket, retry, timerID1, passPost;
+String devicesConnected;
 BlynkTimer timer;
 float tokens[5];
 bool setAlarm = false;
@@ -41,10 +42,10 @@ Ticker lwdTicker;
 #define LWD_TIMEOUT 15 * 1000 // Reboot if loop watchdog timer reaches this time out value
 unsigned long lwdTime = 0;
 unsigned long lwdTimeout = LWD_TIMEOUT;
-SemaphoreHandle_t mutex_http, mutex_sock;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
 const char *deleteAll = "http://192.168.1.252/deleteALL.php";
-
+const char *ipList = "http://192.168.1.252/ip.php";
+const char *esp_data = "http://192.168.1.252/esp-data.php";
 
 // WiFiServer server(80);
 HTTPClient http;
@@ -56,24 +57,13 @@ void setup()
   Serial.begin(115200);
   char ssid[40], pass[40];
   char auth[] = BLYNK_AUTH_TOKEN;
+
   readCiphertext(ssid, pass);
   Blynk.begin(auth, ssid, pass);
-  // server.begin();
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD_ADDR))
     Serial.println(F("SSD1306 allocation failed"));
   else
     flashSSD();
-
-  mutex_sock = xSemaphoreCreateMutex();
-  if (mutex_sock == NULL)
-  {
-    Serial.println("Mutex sock can not be created");
-  }
-  mutex_http = xSemaphoreCreateMutex();
-  if (mutex_http == NULL)
-  {
-    Serial.println("Mutex sock can not be created");
-  }
 
   //  Serial.println("Turned off timer");
   timerID1 = timer.setInterval(1000L * 20, refreshWidgets); //
@@ -99,9 +89,34 @@ void flashSSD()
 
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
-  sensorName = "ROOM1";
-  if (socketClient((char *)ROOM1, (char *)"ALL", (char *)sensorName.c_str(), 1)) // get indoor temp
-    Serial.println("socketClient() failed");
+  String sensorName, ip;
+  int index, index2;
+  http.begin(ipList);
+  int httpResponseCode = http.GET();
+  Serial.printf("httpResponseCode:%d\n", httpResponseCode);
+  if (httpResponseCode != 200)
+  {
+    //  ESP.restart();
+  }
+  devicesConnected = http.getString();
+  Serial.println(devicesConnected);
+  int deviceList = devicesConnected.length();
+
+  for (int i = 0; i < 1; i++)
+  {
+    index = devicesConnected.indexOf(":");
+    sensorName = devicesConnected.substring(0, index);
+    index2 = devicesConnected.indexOf("|");
+    ip = devicesConnected.substring(index+1, index2);
+    devicesConnected = devicesConnected.substring(index2 + 1);
+    Serial.printf("sensor %s ip %s %s\n", sensorName.c_str(), ip.c_str(), devicesConnected.c_str());
+    if (socketClient((char *)ip.c_str(), (char *)"ALL", (char *)sensorName.c_str(), 1)) // get indoor temp
+      Serial.println("socketClient() failed");
+
+    break;
+  }
+
+  
 
   // Blynk.virtualWrite(V7, passSocket);
   // Blynk.virtualWrite(V20, failSocket);
@@ -120,7 +135,6 @@ BLYNK_CONNECTED()
     Serial.println("Blynk Connected");
   getBootTime();
 
-  // delay(2000);
   http.begin(getRowCnt);
   int httpResponseCode = http.GET();
   Serial.printf("httpResponseCode:%d\n", httpResponseCode);
@@ -132,13 +146,23 @@ BLYNK_CONNECTED()
   Serial.println(payload);
   passSocket = payload.toInt();
   Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
-
   http.end();
+
+  // http.begin(ipList);
+  // httpResponseCode = http.GET();
+  // Serial.printf("httpResponseCode:%d\n", httpResponseCode);
+  // if (httpResponseCode != 200)
+  // {
+  //   //  ESP.restart();
+  // }
+  // devicesConnected = http.getString();
+  // Serial.println(devicesConnected);
 }
 
-
-void ICACHE_RAM_ATTR lwdtcb(void) {
-  if ((millis() - lwdTime > LWD_TIMEOUT) || (lwdTimeout - lwdTime != LWD_TIMEOUT)) {
+void ICACHE_RAM_ATTR lwdtcb(void)
+{
+  if ((millis() - lwdTime > LWD_TIMEOUT) || (lwdTimeout - lwdTime != LWD_TIMEOUT))
+  {
     // Blynk.logEvent("3rd_WDTimer");
     Serial.printf("3rd_WDTimer esp.restart %lu %lu\n", (millis() - lwdTime), (lwdTimeout - lwdTime));
     Blynk.virtualWrite(V39, "3rd_WDTimer");
@@ -146,7 +170,8 @@ void ICACHE_RAM_ATTR lwdtcb(void) {
     ESP.restart();
   }
 }
-void lwdtFeed(void) {
+void lwdtFeed(void)
+{
   lwdTime = millis();
   lwdTimeout = lwdTime + LWD_TIMEOUT;
 }
