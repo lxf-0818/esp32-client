@@ -4,7 +4,6 @@
 #include <Arduino.h>
 
 #include <FS.h>
-#include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <BlynkSimpleEsp32.h>
@@ -15,8 +14,6 @@
 #define INPUT_BUFFER_LIMIT 2048
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
-#define ROOM1 "192.168.1.181"
-#define ROOM2 "192.168.1.182"
 #define CLNT "192.168.1.179"
 #define BLYNK_PRINT Serial
 String sensorName = "NO DEVICE";
@@ -30,6 +27,9 @@ int readCiphertext(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
 bool queStat();
 void getBootTime();
+void blynkTimeOn();
+void blynkTimeOff();
+
 
 const uint16_t port = 8888;
 int failSocket, passSocket, recoveredSocket, retry, timerID1, passPost;
@@ -45,6 +45,8 @@ unsigned long lwdTimeout = LWD_TIMEOUT;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
 const char *deleteAll = "http://192.168.1.252/deleteALL.php";
 const char *ipList = "http://192.168.1.252/ip.php";
+const char *macList = "http://192.168.1.252/getMAC.php";
+const char *ipDelete = "http://192.168.1.252/deleteIP.php";
 const char *esp_data = "http://192.168.1.252/esp-data.php";
 
 // WiFiServer server(80);
@@ -58,7 +60,7 @@ void setup()
   char ssid[40], pass[40];
   char auth[] = BLYNK_AUTH_TOKEN;
 
-  readCiphertext(ssid, pass);
+  readCiphertext(ssid, pass); //  ssid and password are encrypted on LittleFS
   Blynk.begin(auth, ssid, pass);
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD_ADDR))
     Serial.println(F("SSD1306 allocation failed"));
@@ -90,36 +92,44 @@ void flashSSD()
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
   String sensorName, ip;
-  int index, index2;
+  int pid, index, index2;
   http.begin(ipList);
   int httpResponseCode = http.GET();
-  Serial.printf("httpResponseCode:%d\n", httpResponseCode);
   if (httpResponseCode != 200)
   {
     //  ESP.restart();
   }
   devicesConnected = http.getString();
-  Serial.println(devicesConnected);
-  int deviceList = devicesConnected.length();
+  //Serial.println(devicesConnected);
+  devicesConnected = devicesConnected.substring(0, devicesConnected.lastIndexOf("|"));
 
-  for (int i = 0; i < 1; i++)
+  for (int i = 0; i < 5; i++)
   {
     index = devicesConnected.indexOf(":");
-    sensorName = devicesConnected.substring(0, index);
+    if (index<0) {
+      Serial.printf("ipStatic DB is corrupted %d\n",index);
+    break;
+    }
+
+    pid = (devicesConnected.substring(0, index).toInt());
+    sensorName = devicesConnected.substring(2, index);
+    
     index2 = devicesConnected.indexOf("|");
-    ip = devicesConnected.substring(index+1, index2);
+    ip = devicesConnected.substring(index + 1, index2);
+
     devicesConnected = devicesConnected.substring(index2 + 1);
-    Serial.printf("sensor %s ip %s %s\n", sensorName.c_str(), ip.c_str(), devicesConnected.c_str());
-    if (socketClient((char *)ip.c_str(), (char *)"ALL", (char *)sensorName.c_str(), 1)) // get indoor temp
+    Serial.printf("pid %d sensor %s ip %s \n", pid, sensorName.c_str(), ip.c_str());
+
+    if (socketClient((char *)ip.c_str(), (char *)"ALL", (char *)sensorName.c_str(), 1))
       Serial.println("socketClient() failed");
 
-    break;
+    if (pid == 0)
+      break;
+
   }
 
-  
-
   // Blynk.virtualWrite(V7, passSocket);
-  // Blynk.virtualWrite(V20, failSocket);
+  // Blynk.virtualWrite(V20, failSocket); 
   // Blynk.virtualWrite(V19, recoveredSocket);
   // Blynk.virtualWrite(V34, retry);
 }
@@ -143,27 +153,17 @@ BLYNK_CONNECTED()
     //  ESP.restart();
   }
   String payload = http.getString();
-  Serial.println(payload);
   passSocket = payload.toInt();
-  Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
+  Serial.printf("passSocket %d  \n", passSocket);
   http.end();
 
-  // http.begin(ipList);
-  // httpResponseCode = http.GET();
-  // Serial.printf("httpResponseCode:%d\n", httpResponseCode);
-  // if (httpResponseCode != 200)
-  // {
-  //   //  ESP.restart();
-  // }
-  // devicesConnected = http.getString();
-  // Serial.println(devicesConnected);
 }
 
 void ICACHE_RAM_ATTR lwdtcb(void)
 {
   if ((millis() - lwdTime > LWD_TIMEOUT) || (lwdTimeout - lwdTime != LWD_TIMEOUT))
   {
-    // Blynk.logEvent("3rd_WDTimer");
+    Blynk.logEvent("3rd_WDTimer");
     Serial.printf("3rd_WDTimer esp.restart %lu %lu\n", (millis() - lwdTime), (lwdTimeout - lwdTime));
     Blynk.virtualWrite(V39, "3rd_WDTimer");
     queStat();
@@ -175,3 +175,12 @@ void lwdtFeed(void)
   lwdTime = millis();
   lwdTimeout = lwdTime + LWD_TIMEOUT;
 }
+//#define FOO
+#ifdef FOO
+void blynkTimeOn() {
+  timer.enable(timerID1);
+}
+void blynkTimeOff() {
+  timer.disable(timerID1);
+}
+#endif

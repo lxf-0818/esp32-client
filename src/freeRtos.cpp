@@ -1,11 +1,11 @@
 #include <Arduino.h>
 #include <FS.h>
-#include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
 #include <CRC32.h>
 #include <Wire.h>
+
 #define NO_UPDATE_FAIL 0
 #define INPUT_BUFFER_LIMIT 2048
 #define NO_SOCKET_AES
@@ -16,7 +16,10 @@ uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
-SemaphoreHandle_t mutex_sock, mutex_http;
+void blynkTimeOn();
+void blynkTimeOff();
+
+SemaphoreHandle_t xMutex_sock, xMutex_http;
 bool queStat();
 typedef struct
 {
@@ -47,8 +50,8 @@ void TaskBlink(void *pvParameters);
 
 void initRTOS()
 {
-    uint32_t socket_delay = 50,http_delay = 2000 , blink_delay = 1000;
-    pinMode(LED_BUILTIN, OUTPUT);
+    uint32_t socket_delay = 50, http_delay = 2000, blink_delay = 1000;
+    pinMode(LED_BUILTIN, OUTPUT); 
 
     QueSocket_Handle = xQueueCreate(20, sizeof(socket_t));
     if (QueSocket_Handle == NULL)
@@ -58,17 +61,17 @@ void initRTOS()
     if (QueHTTP_Handle == NULL)
         Serial.println("Queue could not be created..");
 
+    xTaskCreatePinnedToCore(TaskBlink, "Task Blink", 2048, (void *)&blink_delay, 1, &blink_task_handle, 1);
     xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (void *)&socket_delay, 3, &socket_task_handle, 1);
     xTaskCreatePinnedToCore(taskSQL_HTTP, "http", 2048, (void *)&http_delay, 2, &http_task_handle, 0);
-    xTaskCreatePinnedToCore(TaskBlink, "Task Blink", 2048, (void *)&blink_delay, 1, &blink_task_handle, 1);
 
-    mutex_sock = xSemaphoreCreateMutex();
-    if (mutex_sock == NULL)
+    xMutex_sock = xSemaphoreCreateMutex();
+    if (xMutex_sock == NULL)
     {
         Serial.println("Mutex sock can not be created");
     }
-    mutex_http = xSemaphoreCreateMutex();
-    if (mutex_http == NULL)
+    xMutex_http = xSemaphoreCreateMutex();
+    if (xMutex_http == NULL)
     {
         Serial.println("Mutex sock can not be created");
     }
@@ -84,6 +87,7 @@ int socketRecovery(char *IP, char *cmd2Send, char *sensor)
         Serial.println("QueSocket_Handle failed");
     else
     {
+
         socketQue.fun_ptr = &socketClient;
         strcpy(socketQue.ipAddr, IP);
         strcpy(socketQue.cmd, cmd2Send);
@@ -99,44 +103,13 @@ int socketRecovery(char *IP, char *cmd2Send, char *sensor)
     }
     return 10;
 }
+// Start Task for IO fails on TCP/IP Error Connections 
 
-void taskSocketRecov(void *pvParameters)
-{
-    socket_t socketQue;
-    uint32_t socket_delay = *((uint32_t *)pvParameters);
-    const TickType_t xDelay = socket_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Socket Recov running on coreID:%d  xDelay:%lu\n", xPortGetCoreID(), xDelay);
-    for (;;)
-    {
-        if (QueSocket_Handle != NULL)
-        {
-            int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
-            if (rc == pdPASS)
-            {
-                //"take" blocks calls to esp restart when messages are on queue
-                // see queStat()
-                xSemaphoreTake(mutex_sock, 0);
-                vTaskDelay(xDelay);
-                retry++;
-                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd,
-                                             socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
-                if (!x)
-                {
-                    recoveredSocket++;
-                    Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
-                    Serial.printf("Recovered last network fail for host:%s cmd:%s sensor:%s\n", socketQue.ipAddr, socketQue.cmd, socketQue.sensorName);
-                }
-                else
-                    socketRecovery(socketQue.ipAddr, socketQue.cmd, socketQue.sensorName); //  ********SEND Fail to que here for recovery****
-                xSemaphoreGive(mutex_sock);
-            }
-        }
-    }
-}
 void taskSQL_HTTP(void *pvParameters)
 {
 
     // This task logs the sensor data to mysql using POST()
+    // HTTP Procol is slow .5sec - 2sec, per POST  therefore run on core 0 let core 1 run real time
     HTTPClient http;
     // mysql includes
     WiFiClient client_sql;
@@ -145,7 +118,7 @@ void taskSQL_HTTP(void *pvParameters)
     String serverName = "http://192.168.1.252/post-esp-data.php";
     uint32_t http_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Post SQL running on coreID:%d  xDelay %lu\n", xPortGetCoreID(), xDelay);
+    Serial.printf("Task Post SQL running on coreID:%d  xDelay %u\n", xPortGetCoreID(), xDelay);
     for (;;)
     {
         if (QueHTTP_Handle != NULL)
@@ -154,7 +127,7 @@ void taskSQL_HTTP(void *pvParameters)
             if (ret == pdPASS)
             {
                 //  "take" blocks calls to esp restart while messages are on queue see queStat()
-                xSemaphoreTake(mutex_http, 0);
+                xSemaphoreTake(xMutex_http, 0);
                 http.begin(client_sql, serverName.c_str());
                 http.addHeader("Content-Type", "application/x-www-form-urlencoded");
                 delay(500);
@@ -164,12 +137,6 @@ void taskSQL_HTTP(void *pvParameters)
 
                     passPost++;
                     String payload = http.getString();
-                    char *token = strtok((char *)payload.c_str(), "|"); //
-                    int pID = atoi(token);
-                    //   Serial.printf("DB  pid %d  passPost %d payload %s \n", pID, passPost, payload.c_str());
-
-                    //  if (pID != passPost)
-                    //   Serial.printf("DB corrupted pid %d  passPost %d payload %s \n", pID, passPost, payload.c_str());
                 }
                 else
                 {
@@ -193,13 +160,48 @@ void taskSQL_HTTP(void *pvParameters)
                 }
                 http.end();
                 vTaskDelay(xDelay);
-                xSemaphoreGive(mutex_http);
+                xSemaphoreGive(xMutex_http);
             }
             else if (ret == pdFALSE)
                 Serial.println("The setSQL_HTTP was unable to receive data from the Queue");
         } // Sanity check
     }
 }
+void taskSocketRecov(void *pvParameters)
+{
+    socket_t socketQue;
+    uint32_t socket_delay = *((uint32_t *)pvParameters);
+    const TickType_t xDelay = socket_delay / portTICK_PERIOD_MS;
+    Serial.printf("Task Socket Recov running on coreID:%d  xDelay:%u\n", xPortGetCoreID(), xDelay);
+    for (;;)
+    {
+        if (QueSocket_Handle != NULL)
+        {
+            int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
+            if (rc == pdPASS)
+            {
+                //"take" blocks calls to esp restart when messages are on queue
+                // see queStat()
+                xSemaphoreTake(xMutex_sock, 0);
+                vTaskDelay(xDelay);
+                retry++;
+                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd,
+                                             socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
+                if (!x)
+                {
+                    recoveredSocket++;
+                    Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
+                    Serial.printf("Recovered last network fail for host:%s cmd:%s sensor:%s\n", socketQue.ipAddr, socketQue.cmd, socketQue.sensorName);
+
+                } 
+                else
+                    socketRecovery(socketQue.ipAddr, socketQue.cmd, socketQue.sensorName); //  ********SEND Fail to que here for recovery****
+                xSemaphoreGive(xMutex_sock);
+            }
+        }
+    }
+}
+
 void setupHTTP_request(String sensorName, float tokens[])
 {
     message_t message;
@@ -228,7 +230,7 @@ void TaskBlink(void *pvParameters)
 {
     uint32_t blink_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = blink_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Blink/Blynk running on coreID:%d xDelay:%lu\n", xPortGetCoreID(), xDelay);
+    Serial.printf("Task Blink/Blynk running on coreID:%d xDelay:%u\n", xPortGetCoreID(), xDelay);
     for (;;)
     {
         digitalWrite(LED_BUILTIN, LOW);
@@ -247,11 +249,12 @@ bool queStat()
             Serial.println(">>> Queue Timeout!");
             return false;
         }
-        if ((uxQueueMessagesWaiting(QueSocket_Handle) == 0) && (uxQueueMessagesWaiting(QueHTTP_Handle) == 0))
+        if ((uxQueueMessagesWaiting(QueSocket_Handle) == 0) &&
+            (uxQueueMessagesWaiting(QueHTTP_Handle) == 0))
         {
             Serial.println("no messages on que");
-            xSemaphoreTake(mutex_http, portMAX_DELAY);
-            xSemaphoreTake(mutex_sock, portMAX_DELAY);
+            xSemaphoreTake(xMutex_http, portMAX_DELAY);
+            xSemaphoreTake(xMutex_sock, portMAX_DELAY);
             Serial.println("tasks are now complete........bye!");
             break;
         }

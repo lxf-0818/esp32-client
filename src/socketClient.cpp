@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <FS.h>
-#include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
@@ -22,11 +21,10 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
 
 int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue)
 {
-    uint32_t CRCfromServer;
+    float tokens[5][5] = {};
     char str[80];
     bzero(str, 80);
     WiFiClient client;
-    float tokens[5][5] = {};
     CRC32 crc;
 
     if (!client.connect(espServer, port))
@@ -64,8 +62,8 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     int index = 0;
     while (client.available())
         str[index++] = client.read(); // read sensor data from sever
-    Serial.printf("str %s\n", str);
     client.stop();
+
     // TODO: need to debug  not working 1/11/25 the server encrypted the data correctly but fails decryption on the client
 #ifndef NO_SOCKET_AES
     decrypt_to_cleartext(str, strlen(str), enc_iv_from, cleartext);
@@ -106,11 +104,18 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
 
         token = strtok(NULL, ",");
     }
+//#define DEBUG
 #ifdef DEBUG
     for (int i = 0; i < 5; i++)
     {
+        if (!tokens[i][0])
+            break;
+
         for (int j = 0; j < 5; j++)
+        {
+
             Serial.printf("%f ", tokens[i][j]);
+        }
         Serial.println();
     }
 #endif
@@ -119,6 +124,9 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     {
         switch ((int)tokens[i][0])
         {
+        case 77:
+            strcpy(sensor, "BME");
+            break;
         case 58:
             strcpy(sensor, "BMP");
             break;

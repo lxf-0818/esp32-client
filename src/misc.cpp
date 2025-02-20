@@ -3,7 +3,6 @@
 void getBootTime();
 void get_reset_reason(int reason, char *strReason);
 
-
 void getBootTime()
 {
   const char *ntpServer = "pool.ntp.org";
@@ -16,21 +15,32 @@ void getBootTime()
   int reset_reason = esp_reset_reason();
   get_reset_reason(reset_reason, strReason);
   // Blynk.virtualWrite(V26, strReason);
+  int j = 3;
 
-  if (!getLocalTime(&timeinfo))
+  while (1)
   {
-    strcpy(lastBoot, "Failed to obtain time");
-    Serial.println("Failed to obtain time");
-  }
-  else
-  {
-    int hr = timeinfo.tm_hour;
-    sprintf(lastBoot, "%d/%d/%d %d:%02d 0x%02x",
-            timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_year + 1900, hr, timeinfo.tm_min, reset_reason);
+    if (!getLocalTime(&timeinfo))
+    {
+      strcpy(lastBoot, "Failed to obtain time");
+      Serial.printf("Failed to obtain time retry %d",j);
+      if (j--)
+      { 
+        delay(500); 
+      }
+      else
+        break;  // enough retries 
+    }
+    else
+    {
+      int hr = timeinfo.tm_hour;
+      sprintf(lastBoot, "%d/%d/%d %d:%02d 0x%02x",
+              timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_year + 1900,
+              hr, timeinfo.tm_min, reset_reason);
+      break;  // passed 1st time!
+    }
   }
   // Blynk.virtualWrite(V25, lastBoot);
-  Serial.printf("boot time %s %s\n",lastBoot,strReason); 
-  delay(500);
+  Serial.printf("boot time %s %s\n",lastBoot,strReason);
 }
 void get_reset_reason(int reason, char *strReason)
 {
@@ -85,4 +95,3 @@ void get_reset_reason(int reason, char *strReason)
     strcpy(strReason, "NO_MEAN");
   }
 }
-
