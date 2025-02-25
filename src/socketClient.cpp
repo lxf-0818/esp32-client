@@ -16,10 +16,10 @@ extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
-int socketRecovery(char *IP, char *cmd2Send, char *sensor);
-int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
+int socketRecovery(char *IP, char *cmd2Send);
+int socketClient(char *espServer, char *command, bool updateErorrQue);
 
-int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue)
+int socketClient(char *espServer, char *command,  bool updateErorrQue)
 {
     float tokens[5][5] = {};
     char str[80];
@@ -31,7 +31,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     {
         if (updateErorrQue)
         {                                               // don't update if in recovery mode ie last i/o failed
-            socketRecovery(espServer, command, sensor); // current failed write to error recovery queue
+            socketRecovery(espServer, command); // current failed write to error recovery queue
             failSocket++;
             Serial.printf(">>> failed to connect: %s!\n", espServer);
             lastMsg = "failed to connect " + String(espServer);
@@ -53,7 +53,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
             delay(600);
             if (updateErorrQue)
             {
-                socketRecovery(espServer, command, sensor); // write to error recovery queque
+                socketRecovery(espServer, command); // write to error recovery queque
                 failSocket++;
             }
             return 2;
@@ -83,7 +83,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     if (mycrc != crc.calc())
     {
         Serial.println("no moatch\n");
-        socketRecovery(espServer, command, sensor); // write to error recovery queque
+        socketRecovery(espServer, command); // write to error recovery queque
         return 3;
     }
 
@@ -119,7 +119,7 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
         Serial.println();
     }
 #endif
-
+    char sensor[10]; 
     for (int i = 0; i < 5; i++)
     {
         switch ((int)tokens[i][0])
@@ -144,3 +144,46 @@ int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQ
     }
     return 0;
 }
+// this overload returns malloc its your do Diligence to free!!!
+char* socketClient(char* espServer, char* command) {
+    int j = 0;
+    WiFiClient client;
+    if (!client.connect(espServer, port)) {
+      Serial.print("connection failed from socketClient ");
+      Serial.println(espServer);
+      delay(5000);
+      return NULL;
+    }
+    if (client.connected())
+      client.println(command);  // set cmd to server (esp8266) ie "ADC"/"BMP"
+  
+    unsigned long timeout = millis();
+    // wait for data to be available
+    while (client.available() == 0) {
+      if (millis() - timeout > 15000) {
+        Serial.println(">>> Client Timeout !");
+        client.stop();
+        delay(600);
+        return NULL;
+      }
+    }
+    char* mem = (char*)malloc(80);
+    if (mem == NULL) {
+      // bad boy did you free in caller
+     // Blynk.logEvent("mem_alloc_failed");
+     // queStat();
+      ESP.restart();
+    }
+    //read sensor data from sever
+    while (client.available()) {  //read data from server (esp8266)
+      char ch = static_cast<char>(client.read());
+      mem[j++] = ch;
+    }
+  
+    // Close the connection
+    client.stop();
+    //Serial.println("closing connection");
+  
+    mem[j--] = '\0';
+    return mem;
+  }

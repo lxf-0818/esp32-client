@@ -15,7 +15,7 @@
 uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
-int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
+int socketClient(char *espServer, char *command, bool updateErorrQue);
 void blynkTimeOn();
 void blynkTimeOff();
 
@@ -23,10 +23,9 @@ SemaphoreHandle_t xMutex_sock, xMutex_http;
 bool queStat();
 typedef struct
 {
-    int (*fun_ptr)(char *, char *, char *, bool);
+    int (*fun_ptr)(char *, char *, bool);
     char ipAddr[20];
     char cmd[20];
-    char sensorName[20];
 } socket_t;
 socket_t socketQue;
 
@@ -42,7 +41,7 @@ QueueHandle_t QueSocket_Handle;
 QueueHandle_t QueHTTP_Handle;
 TaskHandle_t socket_task_handle, http_task_handle, blink_task_handle;
 void initRTOS();
-int socketRecovery(char *IP, char *cmd2Send, char *sensor);
+int socketRecovery(char *IP, char *cmd2Send);
 void taskSocketRecov(void *pvParameters);
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
@@ -80,7 +79,7 @@ void initRTOS()
 // This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above
 // ie The server is down or timeout waiting for sensor data from the server
 //
-int socketRecovery(char *IP, char *cmd2Send, char *sensor)
+int socketRecovery(char *IP, char *cmd2Send)
 {
     socket_t socketQue;
     if (QueSocket_Handle == NULL)
@@ -91,7 +90,6 @@ int socketRecovery(char *IP, char *cmd2Send, char *sensor)
         socketQue.fun_ptr = &socketClient;
         strcpy(socketQue.ipAddr, IP);
         strcpy(socketQue.cmd, cmd2Send);
-        strcpy(socketQue.sensorName, sensor);
         int ret = xQueueSend(QueSocket_Handle, (void *)&socketQue, 0);
         if (ret == pdTRUE)
         { /* Serial.println("recovering struct send to QueSocket sucessfully"); */
@@ -185,17 +183,17 @@ void taskSocketRecov(void *pvParameters)
                 xSemaphoreTake(xMutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
-                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd,
-                                             socketQue.sensorName, NO_UPDATE_FAIL); // don't send fail to queue see below
+                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd,NO_UPDATE_FAIL);
+                                              // don't send fail to queue see below
                 if (!x)
                 {
                     recoveredSocket++;
                     Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
-                    Serial.printf("Recovered last network fail for host:%s cmd:%s sensor:%s\n", socketQue.ipAddr, socketQue.cmd, socketQue.sensorName);
+                    Serial.printf("Recovered last network fail for host:%s cmd:%s \n", socketQue.ipAddr, socketQue.cmd);
 
                 } 
                 else
-                    socketRecovery(socketQue.ipAddr, socketQue.cmd, socketQue.sensorName); //  ********SEND Fail to que here for recovery****
+                    socketRecovery(socketQue.ipAddr, socketQue.cmd); //  ********SEND Fail to que here for recovery****
                 xSemaphoreGive(xMutex_sock);
             }
         }

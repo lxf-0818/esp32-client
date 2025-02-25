@@ -25,7 +25,7 @@ void initRTOS();
 void flashSSD();
 void refreshWidgets();
 int readCiphertext(char *ssid, char *psw);
-int socketClient(char *espServer, char *command, char *sensor, bool updateErorrQue);
+int socketClient(char *espServer, char *command,bool updateErorrQue);
 bool queStat();
 void getBootTime();
 void blynkTimeOn();
@@ -102,7 +102,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
     //  ESP.restart();
   }
   devicesConnected = http.getString();
-  // Each row will have its unique IP address 
+  // Each device/row will have its unique IP address 
   // list of devices 2|10,BMP_ADC:192.168.1.7|8,BME:192.168.1.8|
 
   String rows = devicesConnected.substring(0, devicesConnected.indexOf("|"));
@@ -127,7 +127,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
     Serial.printf(" sensor %s ip %s \n", sensorName.c_str(), ip.c_str());
 #endif
 
-    if (socketClient((char *)ip.c_str(), (char *)"ALL", (char *)sensorName.c_str(), 1))
+    if (socketClient((char *)ip.c_str(), (char *)"ALL", 1))
       Serial.println("socketClient() failed");
   }
 
