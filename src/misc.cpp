@@ -22,7 +22,7 @@ void getBootTime()
     if (!getLocalTime(&timeinfo))
     {
       strcpy(lastBoot, "Failed to obtain time");
-      Serial.printf("Failed to obtain time retry %d",j);
+      Serial.printf("Failed to obtain time retry: %d/n",j);
       if (j--)
       { 
         delay(500); 

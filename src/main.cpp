@@ -16,6 +16,7 @@
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define CLNT "192.168.1.179"
 #define BLYNK_PRINT Serial
+// #define DEBUG
 String sensorName = "NO DEVICE";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -29,7 +30,6 @@ bool queStat();
 void getBootTime();
 void blynkTimeOn();
 void blynkTimeOff();
-
 
 const uint16_t port = 8888;
 int failSocket, passSocket, recoveredSocket, retry, timerID1, passPost;
@@ -57,6 +57,7 @@ String lastMsg;
 void setup()
 {
   Serial.begin(115200);
+
   char ssid[40], pass[40];
   char auth[] = BLYNK_AUTH_TOKEN;
 
@@ -92,7 +93,8 @@ void flashSSD()
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
   String sensorName, ip;
-  int pid, index, index2;
+  int index, index1, index2;
+
   http.begin(ipList);
   int httpResponseCode = http.GET();
   if (httpResponseCode != 200)
@@ -100,36 +102,37 @@ void refreshWidgets() // called every x seconds by SimpleTimer
     //  ESP.restart();
   }
   devicesConnected = http.getString();
-  //Serial.println(devicesConnected);
-  devicesConnected = devicesConnected.substring(0, devicesConnected.lastIndexOf("|"));
+  // Each row will have its unique IP address 
+  // list of devices 2|10,BMP_ADC:192.168.1.7|8,BME:192.168.1.8|
 
-  for (int i = 0; i < 5; i++)
+  String rows = devicesConnected.substring(0, devicesConnected.indexOf("|"));
+  int numberOfRows = atoi(rows.c_str());
+#ifdef DEBUG
+  Serial.printf("list of devices %s", devicesConnected.c_str());
+#endif
+
+  index = devicesConnected.indexOf("|");
+  String deviceConn = devicesConnected.substring(index + 1, devicesConnected.lastIndexOf("|"));
+  for (int i = 0; i < numberOfRows; i++)
   {
-    index = devicesConnected.indexOf(":");
-    if (index<0) {
-      Serial.printf("ipStatic DB is corrupted %d\n",index);
-    break;
-    }
+    index = deviceConn.indexOf(":");
+    index1 = deviceConn.indexOf(",");
+    sensorName = deviceConn.substring(index1 + 1, index);
 
-    pid = (devicesConnected.substring(0, index).toInt());
-    sensorName = devicesConnected.substring(2, index);
-    
-    index2 = devicesConnected.indexOf("|");
-    ip = devicesConnected.substring(index + 1, index2);
+    index2 = deviceConn.indexOf("|");
+    ip = deviceConn.substring(index + 1, index2);
+    deviceConn = deviceConn.substring(index2 + 1);
 
-    devicesConnected = devicesConnected.substring(index2 + 1);
-    Serial.printf("pid %d sensor %s ip %s \n", pid, sensorName.c_str(), ip.c_str());
+#ifdef DEBUG
+    Serial.printf(" sensor %s ip %s \n", sensorName.c_str(), ip.c_str());
+#endif
 
     if (socketClient((char *)ip.c_str(), (char *)"ALL", (char *)sensorName.c_str(), 1))
       Serial.println("socketClient() failed");
-
-    if (pid == 0)
-      break;
-
   }
 
   // Blynk.virtualWrite(V7, passSocket);
-  // Blynk.virtualWrite(V20, failSocket); 
+  // Blynk.virtualWrite(V20, failSocket);
   // Blynk.virtualWrite(V19, recoveredSocket);
   // Blynk.virtualWrite(V34, retry);
 }
@@ -156,9 +159,18 @@ BLYNK_CONNECTED()
   passSocket = payload.toInt();
   Serial.printf("passSocket %d  \n", passSocket);
   http.end();
-
 }
-
+// BLYNK_WRITE(BLINK_TST) {
+//   timer.disable(timerID1);
+//   int index = param.asInt();
+//   char *str = socketClient((char *)ipAddr[index], (char *)"TST");
+//   String foo = String(str);
+//   index = foo.indexOf(":");
+//   //skip crc
+//   Blynk.virtualWrite(V12, (foo.substring(index + 1)));
+//   free(str);
+//   timer.enable(timerID1);
+// }
 void ICACHE_RAM_ATTR lwdtcb(void)
 {
   if ((millis() - lwdTime > LWD_TIMEOUT) || (lwdTimeout - lwdTime != LWD_TIMEOUT))
@@ -175,12 +187,14 @@ void lwdtFeed(void)
   lwdTime = millis();
   lwdTimeout = lwdTime + LWD_TIMEOUT;
 }
-//#define FOO
+// #define FOO
 #ifdef FOO
-void blynkTimeOn() {
+void blynkTimeOn()
+{
   timer.enable(timerID1);
 }
-void blynkTimeOff() {
+void blynkTimeOff()
+{
   timer.disable(timerID1);
 }
 #endif

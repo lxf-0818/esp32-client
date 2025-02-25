@@ -253,8 +253,8 @@ bool queStat()
             (uxQueueMessagesWaiting(QueHTTP_Handle) == 0))
         {
             Serial.println("no messages on que");
-            xSemaphoreTake(xMutex_http, portMAX_DELAY);
             xSemaphoreTake(xMutex_sock, portMAX_DELAY);
+            xSemaphoreTake(xMutex_http, portMAX_DELAY);
             Serial.println("tasks are now complete........bye!");
             break;
         }
