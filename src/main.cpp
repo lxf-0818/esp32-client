@@ -25,7 +25,7 @@ void initRTOS();
 void flashSSD();
 void refreshWidgets();
 int readCiphertext(char *ssid, char *psw);
-int socketClient(char *espServer, char *command,bool updateErorrQue);
+int socketClient(char *espServer, char *command, bool updateErorrQue);
 bool queStat();
 void getBootTime();
 void blynkTimeOn();
@@ -49,9 +49,7 @@ const char *macList = "http://192.168.1.252/getMAC.php";
 const char *ipDelete = "http://192.168.1.252/deleteIP.php";
 const char *esp_data = "http://192.168.1.252/esp-data.php";
 
-// WiFiServer server(80);
 HTTPClient http;
-String apiKeyValue = "tPmAT5Ab3j7F9";
 String lastMsg;
 
 void setup()
@@ -93,7 +91,7 @@ void flashSSD()
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
   String sensorName, ip;
-  int index, index1, index2;
+  int index,index2;
 
   http.begin(ipList);
   int httpResponseCode = http.GET();
@@ -102,7 +100,8 @@ void refreshWidgets() // called every x seconds by SimpleTimer
     //  ESP.restart();
   }
   devicesConnected = http.getString();
-  // Each device/row will have its unique IP address 
+
+  // Each device/row will have its unique IP address
   // list of devices 2|10,BMP_ADC:192.168.1.7|8,BME:192.168.1.8|
 
   String rows = devicesConnected.substring(0, devicesConnected.indexOf("|"));
@@ -116,14 +115,15 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   for (int i = 0; i < numberOfRows; i++)
   {
     index = deviceConn.indexOf(":");
-    index1 = deviceConn.indexOf(",");
-    sensorName = deviceConn.substring(index1 + 1, index);
 
     index2 = deviceConn.indexOf("|");
     ip = deviceConn.substring(index + 1, index2);
     deviceConn = deviceConn.substring(index2 + 1);
 
 #ifdef DEBUG
+    int index1 = deviceConn.indexOf(",");
+    sensorName = deviceConn.substring(index1 + 1, index);
+
     Serial.printf(" sensor %s ip %s \n", sensorName.c_str(), ip.c_str());
 #endif
 

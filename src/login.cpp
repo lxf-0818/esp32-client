@@ -1,7 +1,5 @@
 #include <Arduino.h>
-#include <FS.h>
 #include <time.h>
-#include <string.h>
 #include <WiFi.h>
 #include <AESLib.h>
 #include <LittleFS.h>
@@ -56,7 +54,7 @@ uint16_t encrypt_to_ciphertext(char *msg, byte iv[])
 }
 void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext)
 {
-#ifdef ESP8266bb
+#ifdef ESP8266
   // Serial.print("[decrypt_to_cleartext] free heap: ");
   ESP.getFreeHeap();
 #endif
