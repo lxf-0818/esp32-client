@@ -11,6 +11,7 @@
 #define NO_SOCKET_AES
 #define MAX_LINE_LENGTH 120
 #define LED_BUILTIN 2
+SemaphoreHandle_t xMutex_sock, xMutex_http;
 
 uint16_t port = 8888;
 extern String lastMsg;
@@ -18,8 +19,8 @@ extern int failSocket, passSocket, recoveredSocket, retry;
 int socketClient(char *espServer, char *command, bool updateErorrQue);
 void blynkTimeOn();
 void blynkTimeOff();
+int rollBack(int key);
 
-SemaphoreHandle_t xMutex_sock, xMutex_http;
 bool queStat();
 typedef struct
 {
@@ -50,7 +51,7 @@ void TaskBlink(void *pvParameters);
 void initRTOS()
 {
     uint32_t socket_delay = 50, http_delay = 2000, blink_delay = 1000;
-    pinMode(LED_BUILTIN, OUTPUT); 
+    pinMode(LED_BUILTIN, OUTPUT);
 
     QueSocket_Handle = xQueueCreate(20, sizeof(socket_t));
     if (QueSocket_Handle == NULL)
@@ -86,7 +87,6 @@ int socketRecovery(char *IP, char *cmd2Send)
         Serial.println("QueSocket_Handle failed");
     else
     {
-
         socketQue.fun_ptr = &socketClient;
         strcpy(socketQue.ipAddr, IP);
         strcpy(socketQue.cmd, cmd2Send);
@@ -101,7 +101,7 @@ int socketRecovery(char *IP, char *cmd2Send)
     }
     return 10;
 }
-// Start Task for IO fails on TCP/IP Error Connections 
+// Start Task for IO fails on TCP/IP Error Connections
 
 void taskSQL_HTTP(void *pvParameters)
 {
@@ -112,11 +112,11 @@ void taskSQL_HTTP(void *pvParameters)
     // mysql includes
     WiFiClient client_sql;
     int passPost = 0, failPost = 0, recovered = 0;
-
     String serverName = "http://192.168.1.252/post-esp-data.php";
+
     uint32_t http_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Post SQL running on coreID:%d  xDelay %u\n", xPortGetCoreID(), xDelay);
+    Serial.printf("Task Post SQL running on coreID:%d  xDelay %u , %u\n", xPortGetCoreID(), xDelay,http_delay);
     for (;;)
     {
         if (QueHTTP_Handle != NULL)
@@ -139,16 +139,16 @@ void taskSQL_HTTP(void *pvParameters)
                 else
                 {
                     failPost++;
-                    int j = 0, rows = 0;
+                    int j = 0, rc = 0;
                     while (1)
                     {
                         vTaskDelay(xDelay); // mysql is slow wait (non-blocking other task won't be affected)
-                        // rows = rollBack(message.key);
-                        if (rows >= 0 || j == 5)
+                        rc = rollBack(message.key);
+                        if (rc || j == 5)
                             break; // if http error call back
                         j++;
                     }
-                    Serial.printf("rows %d\n", rows);
+                    Serial.printf("rc %d\n", rc);
                     Serial.printf("HTTP Error rc: %d %s %d \n", httpResponseCode, message.line, message.key);
                     Serial.printf("passed %d  failed %d ", passPost, failPost);
                     int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0); // send message back to queue
@@ -170,28 +170,26 @@ void taskSocketRecov(void *pvParameters)
     socket_t socketQue;
     uint32_t socket_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = socket_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Socket Recov running on coreID:%d  xDelay:%u\n", xPortGetCoreID(), xDelay);
+    Serial.printf("Task Socket Recover running on coreID:%d  xDelay:%u\n", xPortGetCoreID(), xDelay);
     for (;;)
     {
         if (QueSocket_Handle != NULL)
         {
-            int rc = xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY);
-            if (rc == pdPASS)
+            if (xQueueReceive(QueSocket_Handle, &socketQue, portMAX_DELAY) == pdPASS)
             {
                 //"take" blocks calls to esp restart when messages are on queue
                 // see queStat()
                 xSemaphoreTake(xMutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
-                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd,NO_UPDATE_FAIL);
-                                              // don't send fail to queue see below
+                Serial.printf("socket error %s %s \n",socketQue.ipAddr, socketQue.cmd);
+                int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd, NO_UPDATE_FAIL);
                 if (!x)
                 {
                     recoveredSocket++;
-                    Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
                     Serial.printf("Recovered last network fail for host:%s cmd:%s \n", socketQue.ipAddr, socketQue.cmd);
-
-                } 
+                    Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
+                }
                 else
                     socketRecovery(socketQue.ipAddr, socketQue.cmd); //  ********SEND Fail to que here for recovery****
                 xSemaphoreGive(xMutex_sock);
@@ -210,10 +208,11 @@ void setupHTTP_request(String sensorName, float tokens[])
     if (QueHTTP_Handle != NULL && uxQueueSpacesAvailable(QueHTTP_Handle) > 0)
     {
 
-        String httpRequestData = "api_key=" + apiKeyValue + "&sensor=" + sensorName + "&location=" + sensorLocation + "&value1=" +
+        String httpRequestData = "api_key=" + apiKeyValue + "&sensor=" + sensorName +
+                                 "&location=" + sensorLocation + "&value1=" +
                                  String(tokens[1]) + "&value2=" + String(tokens[2]) + "&value3=" + String(passSocket) + "";
         strcpy(message.line, httpRequestData.c_str());
-        message.key = tokens[4];
+        message.key = tokens[3];
         message.line[strlen(message.line)] = 0; // Add the terminating nul char4
         int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0);
         if (ret == pdTRUE)

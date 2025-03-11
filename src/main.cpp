@@ -1,6 +1,10 @@
-#define BLYNK_TEMPLATE_ID "TMPL2sDJhOygV"
-#define BLYNK_TEMPLATE_NAME "House"
-#define BLYNK_AUTH_TOKEN "3plcY4yZM3HpnupyR5nmnDlUcXADV9sU"
+#define BLYNK_TEMPLATE_ID "TMPL21W-vgTej"
+#define BLYNK_TEMPLATE_NAME "autoStart"
+#define BLYNK_AUTH_TOKEN "Z1kJtYwbYfKjPOEsLoXMeeTo8DZiq85H"
+
+// #define BLYNK_TEMPLATE_ID "TMPL2sDJhOygV"
+// #define BLYNK_TEMPLATE_NAME "House"
+// #define BLYNK_AUTH_TOKEN "3plcY4yZM3HpnupyR5nmnDlUcXADV9sU"
 #include <Arduino.h>
 
 #include <FS.h>
@@ -11,11 +15,13 @@
 #include <CRC32.h>
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
+#include "blynk_widget.h"
 #define INPUT_BUFFER_LIMIT 2048
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define CLNT "192.168.1.179"
 #define BLYNK_PRINT Serial
+
 // #define DEBUG
 String sensorName = "NO DEVICE";
 
@@ -24,13 +30,14 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 void initRTOS();
 void flashSSD();
 void refreshWidgets();
+void getBootTime(char *lastBook, char *strReason);
+
 int readCiphertext(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, bool updateErorrQue);
+void upDateWidget(char *sensorName, float tokens[]);
 bool queStat();
-void getBootTime();
 void blynkTimeOn();
 void blynkTimeOff();
-
 const uint16_t port = 8888;
 int failSocket, passSocket, recoveredSocket, retry, timerID1, passPost;
 String devicesConnected;
@@ -51,6 +58,7 @@ const char *esp_data = "http://192.168.1.252/esp-data.php";
 
 HTTPClient http;
 String lastMsg;
+char lastBoot[20], strReason[60];
 
 void setup()
 {
@@ -91,7 +99,7 @@ void flashSSD()
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
   String sensorName, ip;
-  int index,index2;
+  int index, index1, index2;
 
   http.begin(ipList);
   int httpResponseCode = http.GET();
@@ -102,10 +110,12 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   devicesConnected = http.getString();
 
   // Each device/row will have its unique IP address
-  // list of devices 2|10,BMP_ADC:192.168.1.7|8,BME:192.168.1.8|
+  // list of devices 2|3,DS1_DS1:192.168.1.5|2,BMP_ADC:192.168.1.7|
 
   String rows = devicesConnected.substring(0, devicesConnected.indexOf("|"));
   int numberOfRows = atoi(rows.c_str());
+
+// #define DEBUG
 #ifdef DEBUG
   Serial.printf("list of devices %s", devicesConnected.c_str());
 #endif
@@ -115,26 +125,24 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   for (int i = 0; i < numberOfRows; i++)
   {
     index = deviceConn.indexOf(":");
-
     index2 = deviceConn.indexOf("|");
     ip = deviceConn.substring(index + 1, index2);
-    deviceConn = deviceConn.substring(index2 + 1);
-
-#ifdef DEBUG
-    int index1 = deviceConn.indexOf(",");
+    index1 = deviceConn.indexOf(","); // skip pid
     sensorName = deviceConn.substring(index1 + 1, index);
-
+#ifdef DEBUG
     Serial.printf(" sensor %s ip %s \n", sensorName.c_str(), ip.c_str());
 #endif
+    // point to next IP string]
+    deviceConn = deviceConn.substring(index2 + 1);
 
     if (socketClient((char *)ip.c_str(), (char *)"ALL", 1))
       Serial.println("socketClient() failed");
   }
 
-  // Blynk.virtualWrite(V7, passSocket);
-  // Blynk.virtualWrite(V20, failSocket);
-  // Blynk.virtualWrite(V19, recoveredSocket);
-  // Blynk.virtualWrite(V34, retry);
+  Blynk.virtualWrite(V7, passSocket);
+  Blynk.virtualWrite(V20, failSocket);
+  Blynk.virtualWrite(V19, recoveredSocket);
+  Blynk.virtualWrite(V34, retry);
 }
 BLYNK_CONNECTED()
 {
@@ -146,7 +154,10 @@ BLYNK_CONNECTED()
   }
   else
     Serial.println("Blynk Connected");
-  getBootTime();
+
+  getBootTime(lastBoot, strReason);
+  Blynk.virtualWrite(V25, lastBoot);
+  Blynk.virtualWrite(V26, strReason);
 
   http.begin(getRowCnt);
   int httpResponseCode = http.GET();
@@ -159,6 +170,16 @@ BLYNK_CONNECTED()
   passSocket = payload.toInt();
   Serial.printf("passSocket %d  \n", passSocket);
   http.end();
+}
+BLYNK_WRITE(V18)
+{
+
+  http.begin(ipDelete);
+  int httpResponseCode = http.GET();
+  if (httpResponseCode != 200)
+  {
+    //  ESP.restart();
+  }
 }
 // BLYNK_WRITE(BLINK_TST) {
 //   timer.disable(timerID1);
@@ -198,3 +219,25 @@ void blynkTimeOff()
   timer.disable(timerID1);
 }
 #endif
+
+void upDateWidget(char *sensor, float tokens[])
+{
+  String sensorName = sensor;
+  if (sensorName == "BMP")
+  {
+  Blynk.virtualWrite(TEMPV4, tokens[1]); // display temp to android app
+    Blynk.virtualWrite(TEMPV6, 0);         // display humidity
+    return;
+  }
+  if (sensorName == "SHT")
+  {
+    Blynk.virtualWrite(V5, tokens[1]);
+    Blynk.virtualWrite(V15, tokens[2]);
+    return;
+  }
+  if (sensorName == "ADC")
+  {
+    Blynk.virtualWrite(GAUGE_HOUSE, tokens[1]);
+    return;
+  }
+}

@@ -1,21 +1,19 @@
 #include <Arduino.h>
 #include "time.h"
-void getBootTime();
+void getBootTime(char *lastBook,char *strReason);
 void get_reset_reason(int reason, char *strReason);
 
-void getBootTime()
+void getBootTime(char *lastBoot,char *strReason)
 {
   const char *ntpServer = "pool.ntp.org";
   const long gmtOffset_sec = -18000;
   const int daylightOffset_sec = 3600;
-  char strReason[80], lastBoot[80];
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   struct tm timeinfo;
 
   int reset_reason = esp_reset_reason();
   get_reset_reason(reset_reason, strReason);
-  // Blynk.virtualWrite(V26, strReason);
-  int j = 3;
+  int j = 3;  
 
   while (1)
   {
@@ -28,7 +26,7 @@ void getBootTime()
         delay(500); 
       }
       else
-        break;  // enough retries 
+        break;  // enough retry 
     }
     else
     {
