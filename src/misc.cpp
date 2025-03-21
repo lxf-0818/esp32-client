@@ -20,13 +20,13 @@ void getBootTime(char *lastBoot,char *strReason)
     if (!getLocalTime(&timeinfo))
     {
       strcpy(lastBoot, "Failed to obtain time");
-      Serial.printf("Failed to obtain time retry: %d/n",j);
+      Serial.printf("Failed to obtain time retry: %d\n",j-2);
       if (j--)
       { 
         delay(500); 
       }
       else
-        break;  // enough retry 
+        break;  // enough retries 
     }
     else
     {
@@ -37,7 +37,6 @@ void getBootTime(char *lastBoot,char *strReason)
       break;  // passed 1st time!
     }
   }
-  // Blynk.virtualWrite(V25, lastBoot);
   Serial.printf("boot time %s %s\n",lastBoot,strReason);
 }
 void get_reset_reason(int reason, char *strReason)

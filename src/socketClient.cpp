@@ -27,8 +27,8 @@ int socketClient(char *espServer, char *command, bool updateErorrQue)
     bzero(str, 80);
     WiFiClient client;
     CRC32 crc;
-    if (!updateErorrQue)
-        Serial.printf("in err reoc %s %s\n", espServer, command);
+    // if (!updateErorrQue)
+    //     Serial.printf("in err reoc %s %s\n", espServer, command);
 
     if (!client.connect(espServer, port))
     {
@@ -42,7 +42,7 @@ int socketClient(char *espServer, char *command, bool updateErorrQue)
         return 1;
     }
     if (client.connected())
-        client.println(command); // send cmd to esp8266 server  ie "ADC"/"BME"
+        client.println(command); // send cmd to esp8266 server  ie ALL/BLK/RST
 
     unsigned long timeout = millis();
     // wait for data to be available
@@ -85,7 +85,7 @@ int socketClient(char *espServer, char *command, bool updateErorrQue)
     crc.add((uint8_t *)parsed.c_str(), parsed.length());
     if (mycrc != crc.calc())
     {
-        Serial.println("no moatch\n");
+        lastMsg = "CRC invalid " + String(espServer);
         socketRecovery(espServer, command); // write to error recovery queque
         return 3;
     }
@@ -105,7 +105,7 @@ int socketClient(char *espServer, char *command, bool updateErorrQue)
 
         token = strtok(NULL, ",");
     }
-// #define DEBUG
+ //#define DEBUG
 #ifdef DEBUG
     for (int i = 0; i < 5; i++)
     {
@@ -125,7 +125,7 @@ int socketClient(char *espServer, char *command, bool updateErorrQue)
     {
         switch ((int)tokens[i][0])
         {
-        case 77:
+        case 76:
             strcpy(sensor, "BME");
             break;
         case 58:
@@ -145,8 +145,8 @@ int socketClient(char *espServer, char *command, bool updateErorrQue)
         }
         passSocket++;
         setupHTTP_request(sensor, tokens[i]);
-        if (updateErorrQue)   // this is a "band aid" crashes in error recovering mode WTF FM! 
-            upDateWidget(sensor, tokens[i]);   // skip if in error recover
+        if (updateErorrQue)                  // this is a "band aid" crashes in error recovering mode WTF FM!
+            upDateWidget(sensor, tokens[i]); // skip if in error recover
     }
     return 0;
 }

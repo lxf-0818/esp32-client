@@ -17,10 +17,12 @@ uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 int socketClient(char *espServer, char *command, bool updateErorrQue);
+
+#ifdef TEST
 void blynkTimeOn();
 void blynkTimeOff();
-int rollBack(int key);
-
+#endif
+int deleteRow(String phpScript);
 bool queStat();
 typedef struct
 {
@@ -53,7 +55,7 @@ void initRTOS()
     uint32_t socket_delay = 50, http_delay = 2000, blink_delay = 1000;
     pinMode(LED_BUILTIN, OUTPUT);
 
-    QueSocket_Handle = xQueueCreate(20, sizeof(socket_t));
+    QueSocket_Handle = xQueueCreate(5, sizeof(socket_t));
     if (QueSocket_Handle == NULL)
         Serial.println("Queue  socket could not be created..");
 
@@ -61,9 +63,11 @@ void initRTOS()
     if (QueHTTP_Handle == NULL)
         Serial.println("Queue could not be created..");
 
-    xTaskCreatePinnedToCore(TaskBlink, "Task Blink", 2048, (void *)&blink_delay, 1, &blink_task_handle, 1);
-    xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (void *)&socket_delay, 3, &socket_task_handle, 1);
-    xTaskCreatePinnedToCore(taskSQL_HTTP, "http", 2048, (void *)&http_delay, 2, &http_task_handle, 0);
+    Serial.printf("initRTOS http %u socket %u blink %u\n", http_delay, socket_delay, blink_delay);
+
+    xTaskCreatePinnedToCore(TaskBlink, "Task Blink", 2048, (uint32_t *)&blink_delay, 1, &blink_task_handle, 1);
+    xTaskCreatePinnedToCore(taskSocketRecov, "Sockets", 2048, (uint32_t *)&socket_delay, 3, &socket_task_handle, 1);
+    xTaskCreatePinnedToCore(taskSQL_HTTP, "http", 2048, (uint32_t *)&http_delay, 2, &http_task_handle, 0);
 
     xMutex_sock = xSemaphoreCreateMutex();
     if (xMutex_sock == NULL)
@@ -77,7 +81,7 @@ void initRTOS()
     }
 }
 
-// This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" above
+// This queue is  ONLY used when a socket error is detected in  fucntion "socketClient" 
 // ie The server is down or timeout waiting for sensor data from the server
 //
 int socketRecovery(char *IP, char *cmd2Send)
@@ -95,8 +99,16 @@ int socketRecovery(char *IP, char *cmd2Send)
         { /* Serial.println("recovering struct send to QueSocket sucessfully"); */
         }
         else if (ret == errQUEUE_FULL)
+        {
             Serial.println(".......unable to send data to socket  Queue is Full");
+            String phpScript = "http://192.168.1.252/deleteMAC.php?key=" +
+                               (String) "'" + (String)WiFi.macAddress() +  "'";
+            deleteRow(phpScript); // delete Blynk.logEvent("3rd_WDTimer");
 
+            xQueueReset(QueSocket_Handle);
+
+            // delete entry in DB
+        }
         return ret;
     }
     return 10;
@@ -115,8 +127,12 @@ void taskSQL_HTTP(void *pvParameters)
     String serverName = "http://192.168.1.252/post-esp-data.php";
 
     uint32_t http_delay = *((uint32_t *)pvParameters);
-    const TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Post SQL running on coreID:%d  xDelay %u , %u\n", xPortGetCoreID(), xDelay,http_delay);
+    TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
+    Serial.printf("Task Post SQL running on coreID:%d  xDelay %u , %u\n", xPortGetCoreID(), xDelay, http_delay);
+    // if (xDelay != 2000)
+    // {
+    //     ESP.restart();
+    // }
     for (;;)
     {
         if (QueHTTP_Handle != NULL)
@@ -132,21 +148,21 @@ void taskSQL_HTTP(void *pvParameters)
                 int httpResponseCode = http.POST(message.line);
                 if (httpResponseCode > 0)
                 {
-
                     passPost++;
                     String payload = http.getString();
                 }
                 else
                 {
+                    String phpScript = "http://192.168.1.252/delete.php?key=" + message.key;
+                    Serial.println(phpScript);
                     failPost++;
                     int j = 0, rc = 0;
                     while (1)
                     {
                         vTaskDelay(xDelay); // mysql is slow wait (non-blocking other task won't be affected)
-                        rc = rollBack(message.key);
-                        if (rc || j == 5)
-                            break; // if http error call back
-                        j++;
+                        rc = deleteRow(phpScript);
+                        if (rc || j++ == 5)
+                            break; //
                     }
                     Serial.printf("rc %d\n", rc);
                     Serial.printf("HTTP Error rc: %d %s %d \n", httpResponseCode, message.line, message.key);
@@ -182,7 +198,7 @@ void taskSocketRecov(void *pvParameters)
                 xSemaphoreTake(xMutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
-                Serial.printf("socket error %s %s \n",socketQue.ipAddr, socketQue.cmd);
+                // Serial.printf("socket error %s %s \n", socketQue.ipAddr, socketQue.cmd);
                 int x = (*socketQue.fun_ptr)(socketQue.ipAddr, socketQue.cmd, NO_UPDATE_FAIL);
                 if (!x)
                 {

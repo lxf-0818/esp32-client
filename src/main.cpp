@@ -36,8 +36,10 @@ int readCiphertext(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, bool updateErorrQue);
 void upDateWidget(char *sensorName, float tokens[]);
 bool queStat();
+#ifdef TEST 
 void blynkTimeOn();
 void blynkTimeOff();
+#endif
 const uint16_t port = 8888;
 int failSocket, passSocket, recoveredSocket, retry, timerID1, passPost;
 String devicesConnected;
@@ -52,7 +54,6 @@ unsigned long lwdTimeout = LWD_TIMEOUT;
 const char *getRowCnt = "http://192.168.1.252/rows.php";
 const char *deleteAll = "http://192.168.1.252/deleteALL.php";
 const char *ipList = "http://192.168.1.252/ip.php";
-const char *macList = "http://192.168.1.252/getMAC.php";
 const char *ipDelete = "http://192.168.1.252/deleteIP.php";
 const char *esp_data = "http://192.168.1.252/esp-data.php";
 
@@ -100,7 +101,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
 {
   String sensorName, ip;
   int index, index1, index2;
-
+  lastMsg = "no warnings";
   http.begin(ipList);
   int httpResponseCode = http.GET();
   if (httpResponseCode != 200)
@@ -143,6 +144,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   Blynk.virtualWrite(V20, failSocket);
   Blynk.virtualWrite(V19, recoveredSocket);
   Blynk.virtualWrite(V34, retry);
+  Blynk.virtualWrite(V39, lastMsg);
 }
 BLYNK_CONNECTED()
 {
@@ -208,8 +210,7 @@ void lwdtFeed(void)
   lwdTime = millis();
   lwdTimeout = lwdTime + LWD_TIMEOUT;
 }
-// #define FOO
-#ifdef FOO
+#ifdef TEST 
 void blynkTimeOn()
 {
   timer.enable(timerID1);

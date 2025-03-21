@@ -41,9 +41,9 @@ uint16_t encrypt_to_ciphertext(char *msg, byte iv[])
   int cipherlength = aesLib.get_cipher64_length(msgLen);
   char encrypted_bytes[cipherlength];
   uint16_t enc_length = aesLib.encrypt64((byte *)msg, msgLen, encrypted_bytes, aes_key, sizeof(aes_key), iv);
-  sprintf(ciphertext, "%s", encrypted_bytes);
 
   // test aes encrypt/decrypt to ensure we good to go
+  sprintf(ciphertext, "%s", encrypted_bytes);
   memcpy(enc_iv_to, aes_iv, sizeof(aes_iv));
   decrypt_to_cleartext(ciphertext, strlen(ciphertext), enc_iv_to, cleartext);
   // Serial.printf("decrypt str %s\n", cleartext);
