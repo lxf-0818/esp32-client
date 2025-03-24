@@ -101,13 +101,11 @@ int socketRecovery(char *IP, char *cmd2Send)
         else if (ret == errQUEUE_FULL)
         {
             Serial.println(".......unable to send data to socket  Queue is Full");
-            String phpScript = "http://192.168.1.252/deleteMAC.php?key=" +
-                               (String) "'" + (String)WiFi.macAddress() +  "'";
+            // delete entry in DB
+            String phpScript = "http://192.168.1.252/deleteMAC.php?key=" + (String)IP;
             deleteRow(phpScript); // delete Blynk.logEvent("3rd_WDTimer");
-
             xQueueReset(QueSocket_Handle);
 
-            // delete entry in DB
         }
         return ret;
     }

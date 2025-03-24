@@ -116,7 +116,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   String rows = devicesConnected.substring(0, devicesConnected.indexOf("|"));
   int numberOfRows = atoi(rows.c_str());
 
-// #define DEBUG
+ // #define DEBUG
 #ifdef DEBUG
   Serial.printf("list of devices %s", devicesConnected.c_str());
 #endif
