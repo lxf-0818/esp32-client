@@ -52,10 +52,10 @@ void TaskBlink(void *pvParameters);
 
 void initRTOS()
 {
-    uint32_t socket_delay = 50, http_delay = 2000, blink_delay = 1000;
+    uint32_t socket_delay = 25, http_delay = 2000, blink_delay = 1000;
     pinMode(LED_BUILTIN, OUTPUT);
 
-    QueSocket_Handle = xQueueCreate(5, sizeof(socket_t));
+    QueSocket_Handle = xQueueCreate(8, sizeof(socket_t));
     if (QueSocket_Handle == NULL)
         Serial.println("Queue  socket could not be created..");
 
@@ -101,7 +101,6 @@ int socketRecovery(char *IP, char *cmd2Send)
         else if (ret == errQUEUE_FULL)
         {
             Serial.println(".......unable to send data to socket  Queue is Full");
-            // delete entry in DB
             String phpScript = "http://192.168.1.252/deleteMAC.php?key=" + (String)IP;
             deleteRow(phpScript); // delete Blynk.logEvent("3rd_WDTimer");
             xQueueReset(QueSocket_Handle);
@@ -121,16 +120,12 @@ void taskSQL_HTTP(void *pvParameters)
     HTTPClient http;
     // mysql includes
     WiFiClient client_sql;
-    int passPost = 0, failPost = 0, recovered = 0;
     String serverName = "http://192.168.1.252/post-esp-data.php";
-
+    int passPost = 0, failPost = 0, recovered = 0;
     uint32_t http_delay = *((uint32_t *)pvParameters);
     TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
     Serial.printf("Task Post SQL running on coreID:%d  xDelay %u , %u\n", xPortGetCoreID(), xDelay, http_delay);
-    // if (xDelay != 2000)
-    // {
-    //     ESP.restart();
-    // }
+    
     for (;;)
     {
         if (QueHTTP_Handle != NULL)
@@ -157,7 +152,7 @@ void taskSQL_HTTP(void *pvParameters)
                     int j = 0, rc = 0;
                     while (1)
                     {
-                        vTaskDelay(xDelay); // mysql is slow wait (non-blocking other task won't be affected)
+                        vTaskDelay(xDelay); // http is slow wait (non-blocking other task won't be affected)
                         rc = deleteRow(phpScript);
                         if (rc || j++ == 5)
                             break; //
