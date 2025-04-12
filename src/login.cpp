@@ -1,3 +1,43 @@
+/**
+ * @file login.cpp
+ * @brief This file contains functions for AES encryption and decryption, as well as handling WiFi credentials securely.
+ *
+ * Includes:
+ * - AES encryption and decryption using the AESLib library.
+ * - File system operations using LittleFS to store and retrieve encrypted WiFi credentials.
+ * - Utility functions for encryption, decryption, and initialization.
+ *
+ * Dependencies:
+ * - Arduino.h
+ * - time.h
+ * - WiFi.h
+ * - AESLib.h
+ * - LittleFS.h
+ *
+ * Constants:
+ * - PORT: The port number used for communication.
+ * - INPUT_BUFFER_LIMIT: The maximum size of the input buffer for encryption/decryption.
+ *
+ * Global Variables:
+ * - aesLib: Instance of AESLib for encryption and decryption.
+ * - aes_key: The AES encryption key.
+ * - aes_iv: The AES initialization vector.
+ * - enc_iv_to: A copy of the initialization vector for encryption.
+ * - enc_iv_from: A copy of the initialization vector for decryption.
+ * - cleartext: Buffer for storing decrypted text.
+ * - ciphertext: Buffer for storing encrypted text in Base64 format.
+ *
+ * Functions:
+ * - aes_init(): Initializes the AES library and sets padding mode.
+ * - decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext): Decrypts a message and stores the result in the provided buffer.
+ * - decryptWifiCredentials(char *ssid, char *psw): Reads encrypted WiFi credentials from a file, decrypts them, and stores the SSID and password.
+ *
+ * Usage:
+ * - Call aes_init() to initialize the AES library before using encryption or decryption functions.
+ * - Use decryptWifiCredentials() to retrieve and decrypt WiFi credentials stored in a file.
+ * - Use encrypt_stub() or encrypt_to_ciphertext() to encrypt data.
+ * - Use decrypt_to_cleartext() to decrypt data.
+ */
 #include <Arduino.h>
 #include <time.h>
 #include <WiFi.h>
@@ -17,7 +57,7 @@ void aes_init();
 uint16_t encrypt_to_ciphertext(char *msg, byte iv[]);
 void encrypt_stub(char *str, char *str2);
 void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext);
-int readCiphertext(char *ssid, char *psw);
+int decryptWifiCredentials(char *ssid, char *psw);
 
 void aes_init()
 {
@@ -71,17 +111,15 @@ void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext
   }
 }
 
-int readCiphertext(char *ssid, char *pass)
+int decryptWifiCredentials(char *ssid, char *pass)
 {
   String ssid_psw_aes;
-
   bool success = LittleFS.begin();
   if (!success)
   {
     Serial.println("Error mounting the file system");
     return 1;
   }
-
   File file = LittleFS.open("/ssid_pass_aes.txt", "r");
   if (!file)
   {
@@ -95,7 +133,6 @@ int readCiphertext(char *ssid, char *pass)
   file.close();
 
   decrypt_to_cleartext((char *)ssid_psw_aes.c_str(), ssid_psw_aes.length(), aes_iv, cleartext);
-  
   String temp = cleartext;
   int index = temp.indexOf(":");
   strcpy(ssid, (temp.substring(0, index)).c_str());
