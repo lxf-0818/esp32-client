@@ -1,6 +1,7 @@
 /**
  * @file login.cpp
- * @brief This file contains functions for AES encryption and decryption, as well as handling WiFi credentials securely.
+ * @brief This file contains functions for AES encryption and decryption,
+ *        as well as handling WiFi credentials securely.
  *
  * Includes:
  * - AES encryption and decryption using the AESLib library.
@@ -15,7 +16,6 @@
  * - LittleFS.h
  *
  * Constants:
- * - PORT: The port number used for communication.
  * - INPUT_BUFFER_LIMIT: The maximum size of the input buffer for encryption/decryption.
  *
  * Global Variables:
@@ -27,10 +27,6 @@
  * - cleartext: Buffer for storing decrypted text.
  * - ciphertext: Buffer for storing encrypted text in Base64 format.
  *
- * Functions:
- * - aes_init(): Initializes the AES library and sets padding mode.
- * - decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext): Decrypts a message and stores the result in the provided buffer.
- * - decryptWifiCredentials(char *ssid, char *psw): Reads encrypted WiFi credentials from a file, decrypts them, and stores the SSID and password.
  *
  * Usage:
  * - Call aes_init() to initialize the AES library before using encryption or decryption functions.
@@ -43,7 +39,6 @@
 #include <WiFi.h>
 #include <AESLib.h>
 #include <LittleFS.h>
-#define PORT 8888
 #define INPUT_BUFFER_LIMIT 2048
 AESLib aesLib;
 byte aes_key[] = {0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C};
@@ -67,14 +62,22 @@ void aes_init()
   memcpy(enc_iv_from, aes_iv, sizeof(aes_iv));
 }
 
-void encrypt_stub(char *str, char *aes_encrypt)
-{
-  memcpy(enc_iv_to, aes_iv, sizeof(aes_iv));
-  encrypt_to_ciphertext(str, enc_iv_to);
-  strcpy(aes_encrypt, ciphertext);
-  Serial.printf("clear text      %s\n", str);
-  Serial.printf("encrypt string: %s\n", ciphertext);
-}
+/**
+ * @brief Encrypts a plaintext message into ciphertext using AES encryption.
+ *
+ * This function takes a plaintext message and an initialization vector (IV),
+ * encrypts the message using AES encryption, and returns the length of the
+ * encrypted ciphertext. It also performs a test decryption to ensure the
+ * encryption and decryption processes are functioning correctly.
+ *
+ * @param msg A pointer to the plaintext message to be encrypted. The message
+ *            must be null-terminated.
+ * @param iv  A byte array representing the initialization vector (IV) used
+ *            for encryption. The IV must be the correct size for the AES
+ *            encryption algorithm.
+ *
+ * @return The length of the encrypted ciphertext.
+ */
 uint16_t encrypt_to_ciphertext(char *msg, byte iv[])
 {
   int msgLen = strlen(msg);
@@ -92,6 +95,33 @@ uint16_t encrypt_to_ciphertext(char *msg, byte iv[])
     Serial.println("match");
   return enc_length;
 }
+void encrypt_stub(char *str, char *aes_encrypt)
+{
+  memcpy(enc_iv_to, aes_iv, sizeof(aes_iv));
+  encrypt_to_ciphertext(str, enc_iv_to);
+  strcpy(aes_encrypt, ciphertext);
+#ifdef DEBUG
+  Serial.printf("clear text      %s\n", str);
+  Serial.printf("encrypt string: %s\n", ciphertext);
+#endif
+}
+/**
+ * @brief Decrypts a base64-encoded encrypted message into cleartext.
+ *
+ * This function takes an encrypted message, decrypts it using AES encryption,
+ * and stores the resulting cleartext in the provided buffer. Any non-printable
+ * ASCII characters (below 32) in the cleartext are replaced with '\0' to terminate
+ * the string.
+ *
+ * @param msg       Pointer to the base64-encoded encrypted message.
+ * @param msgLen    Length of the encrypted message.
+ * @param iv        Initialization vector (IV) used for decryption.
+ * @param cleartext Pointer to the buffer where the decrypted cleartext will be stored.
+ *                  The buffer must be large enough to hold the decrypted data.
+ *
+ * @note On ESP8266, the function logs the free heap memory before decryption.
+ * @note If DEBUG is defined, additional debug information is printed to the Serial monitor.
+ */
 void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext)
 {
 #ifdef ESP8266
@@ -102,10 +132,14 @@ void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext
 
   for (int j = 0; j < decLen; j++)
   {
-    if (cleartext[j] < 32)   // added lxf
+    // Replace any non-printable ASCII characters (below 32) with '\0' to terminate the string.
+
+    if (cleartext[j] < 32)
     {
-      cleartext[j] = '\0';
-      Serial.printf("break j=%d len =%d \n",j,decLen);
+      cleartext[j] = '\0'; // null-terminated string
+#ifdef DEBUG
+      Serial.printf("break j=%d len =%d \n", j, decLen);
+#endif
       break;
     }
   }

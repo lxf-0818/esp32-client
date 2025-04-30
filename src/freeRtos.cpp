@@ -8,7 +8,7 @@
  *
  * @details
  * - **Tasks**:
- *   - `TaskBlink`: Toggles the built-in LED at a specified interval.
+ *   - `taskBlink`: Toggles the built-in LED at a specified interval.
  *   - `taskSocketRecov`: Handles socket recovery by retrying failed socket operations.
  *   - `taskSQL_HTTP`: Logs sensor data to a MySQL database using HTTP POST requests.
  *
@@ -31,7 +31,6 @@
  *   - `xMutex_sock`, `xMutex_http`: Mutex handles.
  *   - `QueSocket_Handle`, `QueHTTP_Handle`: Queue handles.
  *   - `socket_task_handle`, `http_task_handle`, `blink_task_handle`: Task handles.
- *   - `port`: Port number for socket communication.
  *   - `lastMsg`, `failSocket`, `passSocket`, `recoveredSocket`, `retry`: Variables for tracking task statuses.
  *
  * - **Functions**:
@@ -40,7 +39,7 @@
  *   - `taskSocketRecov`: Processes socket recovery tasks from the queue.
  *   - `taskSQL_HTTP`: Processes HTTP POST requests from the queue.
  *   - `setupHTTP_request`: Prepares and enqueues an HTTP POST request.
- *   - `TaskBlink`: Toggles the built-in LED at regular intervals.
+ *   - `taskBlink`: Toggles the built-in LED at regular intervals.
  *   - `queStat`: Checks the status of queues and ensures all tasks are complete.
  *   - `deleteRow`: Deletes a row from the database using a PHP script.
  *   - `socketClient`: Sends a command to a server via a socket connection.
@@ -62,24 +61,25 @@
 #include <Wire.h>
 
 // Constants
+//#define DEBUG
 #define SOCKET_QUEUE_SIZE 2
 #define HTTP_QUEUE_SIZE 5
 #define TASK_STACK_SIZE 2048
-#define SOCKET_DELAY_MS 25
+#define SOCKET_DELAY_MS 50 
 #define HTTP_DELAY_MS 2000
 #define BLINK_DELAY_MS 1000
 #define LED_PIN 2
 #define NO_UPDATE_FAIL 0
 #define INPUT_BUFFER_LIMIT 2048
-#define NO_SOCKET_AES
 #define MAX_LINE_LENGTH 120
 #define LED_BUILTIN 2
+#define MAX_RETRY 5
+#define WORDS_PER_BYTE 4
 
 // Global Variables
 SemaphoreHandle_t xMutex_sock, xMutex_http;
 QueueHandle_t QueSocket_Handle, QueHTTP_Handle;
 TaskHandle_t socket_task_handle, http_task_handle, blink_task_handle;
-uint16_t port = 8888;
 extern String lastMsg;
 extern int failSocket, passSocket, recoveredSocket, retry;
 
@@ -89,7 +89,7 @@ int socketRecovery(char *IP, char *cmd2Send);
 void taskSocketRecov(void *pvParameters);
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
-void TaskBlink(void *pvParameters);
+void taskBlink(void *pvParameters);
 bool queStat();
 int deleteRow(String phpScript);
 int socketClient(char *espServer, char *command, bool updateErrorQueue);
@@ -115,6 +115,38 @@ typedef struct
 } message_t;
 message_t message;
 
+/**
+ * @brief Initializes the FreeRTOS components for the application.
+ *
+ * This function sets up the necessary FreeRTOS tasks, queues, and mutexes
+ * required for the application to function. It performs the following:
+ *
+ * - Configures the built-in LED pin as an output.
+ * - Creates two queues:
+ *   - `QueSocket_Handle`: A queue for socket-related data.
+ *   - `QueHTTP_Handle`: A queue for HTTP-related messages.
+ * - Creates three tasks with specific priorities and stack sizes:
+ *   - `taskBlink`: Handles LED blinking functionality.
+ *   - `taskSQL_HTTP`: Manages HTTP-related operations.
+ *   - `taskSocketRecov`: Handles socket recovery operations.
+ * - FreeRTOS Scheduler: Once the above tasks are created, the FreeRTOS scheduler automatically manages their
+ *                       execution based on their priorities and delays (vTaskDelay).
+ * - Creates two mutexes:
+ *   - `xMutex_sock`: A mutex for socket-related synchronization.
+ *   - `xMutex_http`: A mutex for HTTP-related synchronization.
+ *
+ * If any queue or mutex creation fails, an error message is printed to the
+ * serial monitor.
+ *
+ * @note This function assumes that the following macros are defined:
+ * - `SOCKET_DELAY_MS`: Delay for socket task.
+ * - `HTTP_DELAY_MS`: Delay for HTTP task.
+ * - `BLINK_DELAY_MS`: Delay for blink task.
+ * - `SOCKET_QUEUE_SIZE`: Size of the socket queue.
+ * - `HTTP_QUEUE_SIZE`: Size of the HTTP queue.
+ * - `TASK_STACK_SIZE`: Base stack size for tasks.
+ * - `LED_BUILTIN`: Pin number for the built-in LED.
+ */
 void initRTOS()
 {
     uint32_t socket_delay = SOCKET_DELAY_MS, http_delay = HTTP_DELAY_MS, blink_delay = BLINK_DELAY_MS;
@@ -128,11 +160,15 @@ void initRTOS()
     if (QueHTTP_Handle == NULL)
         Serial.println("Queue could not be created..");
 
+    xTaskCreatePinnedToCore(taskBlink, "Task Blink", TASK_STACK_SIZE, (uint32_t *)&blink_delay, 1, &blink_task_handle, 1);
+    xTaskCreatePinnedToCore(taskSQL_HTTP, "Task HTTP", TASK_STACK_SIZE * 2, (uint32_t *)&http_delay, 2, &http_task_handle, 0);
+    xTaskCreatePinnedToCore(taskSocketRecov, "Task Sockets", TASK_STACK_SIZE * 2, (uint32_t *)&socket_delay, 3, &socket_task_handle, 1);
 
-    xTaskCreatePinnedToCore(TaskBlink, "Task Blink", TASK_STACK_SIZE, (uint32_t *)&blink_delay, 1, &blink_task_handle, 1);
-    xTaskCreatePinnedToCore(taskSQL_HTTP, "Task HTTP", TASK_STACK_SIZE*2, (uint32_t *)&http_delay, 2, &http_task_handle, 0);
-    xTaskCreatePinnedToCore(taskSocketRecov, "Task Sockets", TASK_STACK_SIZE*2, (uint32_t *)&socket_delay, 3, &socket_task_handle, 1);
-
+    if (blink_task_handle == NULL || socket_task_handle == NULL || http_task_handle == NULL)
+    {
+        Serial.println("tasks not running");
+        ESP.restart();
+    }
     xMutex_sock = xSemaphoreCreateMutex();
     if (xMutex_sock == NULL)
     {
@@ -145,9 +181,22 @@ void initRTOS()
     }
 }
 
-// This queue is  ONLY used when a socket error is detected in  fucntion "socketClient"
-// ie The server is down or timeout waiting for sensor data from the server
-//
+/**
+ * @brief Sends a socket structure to a FreeRTOS queue for processing.
+ *
+ * This function attempts to send a `socket_t` structure containing the IP address
+ * and command to a FreeRTOS queue. If the queue is full, it resets the queue and
+ * optionally deletes a row from a remote database using an HTTP request.
+ *
+ * @param IP Pointer to a character array containing the IP address.
+ * @param cmd2Send Pointer to a character array containing the command to send.
+ * @return int Returns `pdTRUE` (1) if the structure was successfully sent to the queue,
+ *             `errQUEUE_FULL` (0) if the queue is full, or 10 if the queue handle is NULL.
+ *
+ * @note Ensure that `QueSocket_Handle` is initialized before calling this function.
+ *       If the queue is full, the function will reset the queue and attempt to delete
+ *       a row from the database using the provided IP address.
+ */
 int socketRecovery(char *IP, char *cmd2Send)
 {
     socket_t socketQue;
@@ -166,7 +215,7 @@ int socketRecovery(char *IP, char *cmd2Send)
         {
             Serial.println(".......unable to send data to socket  Queue is Full");
             String phpScript = "http://192.168.1.252/deleteMAC.php?key=" + (String)IP;
-            deleteRow(phpScript); // delete Blynk.logEvent("3rd_WDTimer");
+            deleteRow(phpScript); // delete //Blynk.logEvent("3rd_WDTimer");
             xQueueReset(QueSocket_Handle);
         }
         return ret;
@@ -201,7 +250,7 @@ int socketRecovery(char *IP, char *cmd2Send)
  * @note
  * - The task uses non-blocking delays (`vTaskDelay`) to avoid affecting other tasks.
  * - The HTTP client (`HTTPClient`) and WiFi client (`WiFiClient`) are used for
- *   communication with the server.
+ *   communication with the php server.
  * - The server URL and PHP script paths are hardcoded in the task.
  *
  * @warning
@@ -212,9 +261,6 @@ int socketRecovery(char *IP, char *cmd2Send)
  */
 void taskSQL_HTTP(void *pvParameters)
 {
-
-    // This task logs the sensor data to mysql using POST()
-    // HTTP Procol is slow .5sec - 2sec, per POST  therefore run on core 0 let core 1 run real time
     HTTPClient http;
     // mysql includes
     WiFiClient client_sql;
@@ -222,8 +268,9 @@ void taskSQL_HTTP(void *pvParameters)
     int passPost = 0, failPost = 0, recovered = 0;
     uint32_t http_delay = *((uint32_t *)pvParameters);
     TickType_t xDelay = http_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Post SQL running on coreID:%d  xDelay %u , %u\n", xPortGetCoreID(), (unsigned int)xDelay, (unsigned int)http_delay);
-   
+    Serial.printf("Task Post SQL running on CoreID:%d xDelay:%u ms Free Bytes: %d\n",
+                  xPortGetCoreID(), (unsigned int)xDelay, uxTaskGetStackHighWaterMark(NULL) * WORDS_PER_BYTE);
+
     for (;;)
     {
         if (QueHTTP_Handle != NULL)
@@ -235,7 +282,7 @@ void taskSQL_HTTP(void *pvParameters)
                 xSemaphoreTake(xMutex_http, 0);
                 http.begin(client_sql, serverName.c_str());
                 http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-                delay(500);
+               // delay(500);
                 int httpResponseCode = http.POST(message.line);
                 if (httpResponseCode > 0)
                 {
@@ -252,7 +299,7 @@ void taskSQL_HTTP(void *pvParameters)
                     {
                         vTaskDelay(xDelay); // http is slow wait (non-blocking other task won't be affected)
                         rc = deleteRow(phpScript);
-                        if (rc || j++ == 5)
+                        if (rc || j++ == MAX_RETRY)
                             break; //
                     }
                     Serial.printf("rc %d\n", rc);
@@ -292,10 +339,6 @@ void taskSQL_HTTP(void *pvParameters)
  * 6. If recovery fails, re-queues the socket message for another recovery attempt.
  * 7. Releases the mutex after processing the message.
  *
- * @note The task runs indefinitely and should be pinned to a specific core if required.
- *       Ensure that the queue handle (`QueSocket_Handle`) and mutex (`xMutex_sock`) are
- *       properly initialized before starting this task.
- *
  * @warning This task assumes that the function pointer in the `socket_t` structure is valid
  *          and callable. Ensure proper validation of the function pointer to avoid undefined behavior.
  */
@@ -304,7 +347,8 @@ void taskSocketRecov(void *pvParameters)
     socket_t socketQue;
     uint32_t socket_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = socket_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Socket Recover running on coreID:%d  xDelay:%u\n", (unsigned int)xPortGetCoreID(), (unsigned int)xDelay);
+    Serial.printf("Task Socket Recover running on CoreID:%d xDelay:%u ms Free Bytes:%d\n",
+                  (unsigned int)xPortGetCoreID(), (unsigned int)xDelay, uxTaskGetStackHighWaterMark(NULL) * WORDS_PER_BYTE);
     for (;;)
     {
         if (QueSocket_Handle != NULL)
@@ -349,7 +393,7 @@ void taskSocketRecov(void *pvParameters)
  *       in the HTTP request and an external FreeRTOS queue handle `QueHTTP_Handle`.
  *
  * @details The constructed HTTP request string includes the following parameters:
- *          - api_key: A predefined API key.
+ *          - api_key: A predefined API key,
  *          - sensor: The provided sensor name.
  *          - location: A predefined sensor location ("HOME").
  *          - value1, value2: Values from the `tokens` array.
@@ -376,8 +420,9 @@ void setupHTTP_request(String sensorName, float tokens[])
         httpRequestData += "&value1=" + String(tokens[1]);
         httpRequestData += "&value2=" + String(tokens[2]);
         httpRequestData += "&value3=" + String(passSocket) + "";
-
-      //  Serial.printf("http req data %s\n",httpRequestData.c_str());
+#ifdef DEBUG
+        Serial.printf("http req data %s %d\n", httpRequestData.c_str(), passSocket);
+#endif
 
         strcpy(message.line, httpRequestData.c_str());
         message.key = tokens[3];
@@ -391,11 +436,29 @@ void setupHTTP_request(String sensorName, float tokens[])
             Serial.println(".......unable to send data to htpp Queue is Full");
     }
 }
-void TaskBlink(void *pvParameters)
+/**
+ * @brief Task function to blink an LED at a specified interval.
+ *
+ * This FreeRTOS task toggles the state of the built-in LED (LED_BUILTIN)
+ * on and off with a delay specified by the parameter passed to the task.
+ * The delay is converted from milliseconds to ticks using the
+ * FreeRTOS macro `portTICK_PERIOD_MS`.
+ *
+ * @param pvParameters Pointer to a uint32_t variable that specifies the
+ *                     blink delay in milliseconds. This value is used
+ *                     to calculate the delay in ticks for the task.
+ *
+ * @note The task runs indefinitely in a loop and prints diagnostic
+ *       information to the serial monitor, including the core ID it
+ *       is running on, the delay in milliseconds, and the remaining
+ *       stack space in bytes.
+ */
+void taskBlink(void *pvParameters)
 {
     uint32_t blink_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = blink_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Blink/Blynk running on coreID:%d xDelay:%u\n", (unsigned int)xPortGetCoreID(), (unsigned int)xDelay);
+    Serial.printf("Task Blink running on CoreID:%d xDelay:%u ms Free Bytes: %d\n",
+                  (unsigned int)xPortGetCoreID(), (unsigned int)xDelay, uxTaskGetStackHighWaterMark(NULL) * WORDS_PER_BYTE);
     for (;;)
     {
         digitalWrite(LED_BUILTIN, LOW);
@@ -404,6 +467,18 @@ void TaskBlink(void *pvParameters)
         vTaskDelay(xDelay);
     }
 }
+/**
+ * @brief Checks the status of two FreeRTOS queues and waits until they are empty.
+ *
+ * This function monitors the message count of two queues (`QueSocket_Handle` and
+ * `QueHTTP_Handle`) and waits until both are empty. If the queues are not empty
+ * within a 5-second timeout, the function logs a timeout message and returns false.
+ * Otherwise, it takes two mutexes (`xMutex_sock` and `xMutex_http`) to ensure
+ * exclusive access and logs a completion message before returning true.
+ *
+ * @return true If both queues are empty and the mutexes are successfully taken.
+ * @return false If the queues are not empty within the 5-second timeout.
+ */
 bool queStat()
 {
     unsigned long timeout = millis();
