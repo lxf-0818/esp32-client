@@ -208,7 +208,8 @@ void processSensorData(float tokens[5][5], bool updateErrorQueue)
             {58, "BMP280"},
             {44, "SHT35"},
             {48, "ADS1115"},
-            {28, "DS1"}};
+            {28, "DS1"}
+        }; 
 
     char sensor[10];
 

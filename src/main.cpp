@@ -90,6 +90,9 @@ void upDateWidget(char *sensorName, float tokens[]);
 void lwdtFeed(void);
 void ICACHE_RAM_ATTR lwdtcb(void);
 bool queStat();
+bool isServerConnected(const char *serverIP, uint16_t port = 8888);
+void generateInterrupt();
+void taskPing(void *pvParameters);
 
 std::map<std::string, std::string> ipMap;
 const uint16_t port = 8888;
@@ -103,7 +106,7 @@ BlynkTimer timer;
 float tokens[5];
 bool setAlarm = false;
 Ticker lwdTicker;
-int lastSize = 0;
+String lastSensorsConnected = "";
 #define LWD_TIMEOUT 15 * 1000 // Reboot if loop watchdog timer reaches this time out value
 unsigned long lwdTime = 0;
 unsigned long lwdTimeout = LWD_TIMEOUT;
@@ -138,6 +141,12 @@ void loop()
   lwdtFeed();
   Blynk.run();
   timer.run();
+
+  // // Example: Trigger the interrupt manually for testing
+  // if (millis() % 10000 == 0) // Every 10 seconds
+  // {
+  //   generateInterrupt();
+  // }
 }
 
 void flashSSD()
@@ -153,23 +162,18 @@ void flashSSD()
 }
 
 /**
- * @brief Refreshes the widgets by fetching sensor data and updating Blynk virtual pins.
+ * @brief Refreshes the widgets by fetching sensor data, updating the Blynk terminal,
+ *        and writing relevant data to virtual pins.
  *
- * This function is called periodically by a timer (e.g., SimpleTimer). It performs an HTTP GET
- * request to retrieve sensor connection data, parses the data, and updates various Blynk virtual
- * pins with the latest information.
+ * This function is called periodically by a timer. It performs the following tasks:
+ * - Fetches the list of connected sensors from a remote server using an HTTP GET request.
+ * - Parses the fetched sensor data and updates the internal state if there are changes.
+ * - Updates the Blynk terminal with the list of connected sensors and their IP addresses.
+ * - Writes various statistics (e.g., pass, fail, recovered, retry counts, and last message)
+ *   to specific Blynk virtual pins.
  *
- * @details
- * - Fetches sensor connection data from mySQL using the `performHttpGet` function.
- * - If the data retrieval fails, logs an error message and exits the function.
- * - Parses the fetched data using the `parseSensorsConnected` function.
- * - Updates the following Blynk virtual pins:
- *   - V7: Updated with the value of `passSocket`.
- *   - V20: Updated with the value of `failSocket`.
- *   - V19: Updated with the value of `recoveredSocket`.
- *   - V34: Updated with the value of `retry`.
- *   - V39: Updated with the value of `lastMsg`.
- *
+ * @note If the HTTP GET request fails or no sensors are connected, the function logs an error
+ *       message and exits early.
  */
 void refreshWidgets() // called every x seconds by SimpleTimer
 {
@@ -177,24 +181,22 @@ void refreshWidgets() // called every x seconds by SimpleTimer
   String sensorsConnected = performHttpGet(ipList);
   if (sensorsConnected.isEmpty())
   {
-    Serial.println("Failed to fetch sensorsConnected data");
+    Serial.println("Failed to fetch sensors from mySQL or No devices connected to network");
     return;
   }
-  if (lastSize != ipMap.size())
+  parseSensorsConnected(sensorsConnected);
+
+  if (lastSensorsConnected != sensorsConnected)
   {
-    
-    Blynk.virtualWrite(V42, "\n\n"); // clear Blynk terminal
+    Blynk.virtualWrite(V42, "\nStart:\n"); // clear Blynk terminal
     for (const auto &pair : ipMap)
     {
       Serial.printf("Sensor: %s, IP: %s\n", pair.first.c_str(), pair.second.c_str());
-      sprintf(tmp, "Sensor: %s, IP: %s\n", pair.first.c_str(), pair.second.c_str());
+      sprintf(tmp, "\tSensor: %s, IP: %s\n", pair.first.c_str(), pair.second.c_str());
       Blynk.virtualWrite(V42, tmp);
     }
-    lastSize = ipMap.size();
+    lastSensorsConnected = sensorsConnected;
   }
-  else Serial.printf("ipMap did not change\n");
-  
-  parseSensorsConnected(sensorsConnected);
 
   Blynk.virtualWrite(V7, passSocket);
   Blynk.virtualWrite(V20, failSocket);
@@ -214,7 +216,7 @@ BLYNK_CONNECTED()
   }
   else
     Serial.println("Blynk Connected");
-  refreshWidgets();
+
   getBootTime(lastBoot, strReason);
   Blynk.virtualWrite(V25, lastBoot);
   Blynk.virtualWrite(V26, strReason);
@@ -225,7 +227,7 @@ BLYNK_CONNECTED()
   String payload = performHttpGet(getRowCnt);
   if (payload.isEmpty())
   {
-    Serial.println("Failed to fetch ip for connected devices");
+    Serial.println("Failed to HHTP request ");
     return;
   }
   else
@@ -234,7 +236,6 @@ BLYNK_CONNECTED()
     Serial.printf("passSocket %d  \n", passSocket);
   }
   refreshWidgets();
-  
 }
 BLYNK_WRITE(V18)
 {
@@ -245,11 +246,23 @@ BLYNK_WRITE(V18)
     return;
   }
 }
-BLYNK_WRITE(V42)
-{
-  String input = param.asStr(); // Read the input from the terminal widget
-  Serial.println("Received from terminal: " + input);
-}
+/**
+ * @brief Handles incoming data from the Blynk virtual pin V42.
+ *
+ * This function is triggered whenever data is sent to the virtual pin V42
+ * in the Blynk application. It processes the input string and performs
+ * specific actions based on the command received.
+ *
+ * Commands:
+ * - "refr": Resets sensor connection status, refreshes widgets, and resets
+ *           failure/recovery counters.
+ * - "test": Triggers a test interrupt by calling the `generateInterrupt` function.
+ * - "ping": Iterates through a map of IP addresses, checks server connectivity,
+ *           and sends the results back to the terminal widget on V42.
+ *
+ * @param param The parameter object containing the data sent to the virtual pin.
+ *              The input is expected to be a string.
+ */
 BLYNK_WRITE(BLINK_TST)
 {
   timer.disable(timerID1);
@@ -272,8 +285,26 @@ BLYNK_WRITE(BLINK_TST)
   //  free(str);
   timer.enable(timerID1);
 }
+/**
+ * @brief ISR (Interrupt Service Routine) for handling the lightweight watchdog timer (LWD).
+ *
+ * This function is marked with `ICACHE_RAM_ATTR` to ensure it is placed in IRAM,
+ * allowing it to be executed during interrupt handling. It checks if the elapsed
+ * time since the last watchdog reset exceeds the defined timeout (`LWD_TIMEOUT`)
+ * or if there is an inconsistency in the timeout calculation. If either condition
+ * is met, it logs the event, writes a status to a Blynk virtual pin, queues the
+ * current status, and restarts the ESP device.
+ *
+ * @note This function is intended to be called as an interrupt callback and
+ *       should execute as quickly as possible to avoid interrupt blocking.
+ *
+ * @warning Restarting the ESP device will cause all current operations to stop
+ *          and the device to reboot.
+ */
 void ICACHE_RAM_ATTR lwdtcb(void)
 {
+  // Serial.println("Interrupt generated!");
+
   if ((millis() - lwdTime > LWD_TIMEOUT) || (lwdTimeout - lwdTime != LWD_TIMEOUT))
   {
     // Blynk.logEvent("3rd_WDTimer");
@@ -283,22 +314,37 @@ void ICACHE_RAM_ATTR lwdtcb(void)
     ESP.restart();
   }
 }
+/**
+ * @brief Resets the lightweight watchdog timer by updating the current time and timeout.
+ *
+ * This function sets the `lwdTime` variable to the current time (in milliseconds)
+ * and calculates the new timeout value by adding the predefined `LWD_TIMEOUT`
+ * to the current time. It ensures that the lightweight watchdog timer does not
+ * trigger a timeout as long as this function is called periodically.
+ */
 void lwdtFeed(void)
 {
   lwdTime = millis();
   lwdTimeout = lwdTime + LWD_TIMEOUT;
 }
-#ifdef TEST
-void blynkTimeOn()
-{
-  timer.enable(timerID1);
-}
-void blynkTimeOff()
-{
-  timer.disable(timerID1);
-}
-#endif
 
+/**
+ * @brief Updates the Blynk widgets with sensor data based on the sensor type.
+ *
+ * @param sensor A character pointer representing the name of the sensor
+ *               (e.g., "BME280", "SHT35", "ADS1115").
+ * @param tokens An array of float values containing sensor data. The specific
+ *               indices used depend on the sensor type:
+ *               - For "BME280": tokens[1] is temperature, tokens[2] is humidity.
+ *               - For "SHT35": tokens[1] is temperature, tokens[2] is humidity.
+ *               - For "ADS1115": tokens[1] is the gauge value.
+ *
+ * @note This function uses the Blynk.virtualWrite() method to send data to
+ *       specific virtual pins in the Blynk app:
+ *       - "BME280": V4 (temperature), V6 (humidity).
+ *       - "SHT35": V5 (temperature), V15 (humidity).
+ *       - "ADS1115": GAUGE_HOUSE (gauge value).
+ */
 void upDateWidget(char *sensor, float tokens[])
 {
   String localSensorName = sensor;
@@ -320,7 +366,16 @@ void upDateWidget(char *sensor, float tokens[])
     return;
   }
 }
-// Function to handle HTTP GET requests and return the response as a string
+/**
+ * @brief Performs an HTTP GET request to the specified URL and retrieves the response as a string.
+ *
+ * @param url The URL to send the HTTP GET request to. Must be a null-terminated C-style string.
+ * @return String The response payload as a string if the request is successful.
+ *         Returns an empty string if the request fails or the HTTP response code is not 200.
+ *
+ * @note If the macro DEBUG_PHP is defined, the response payload will be printed to the Serial monitor.
+ */
+//#define DEBUG_PHP
 String performHttpGet(const char *url)
 {
   http.begin(url);
@@ -332,7 +387,7 @@ String performHttpGet(const char *url)
   }
   String response = http.getString();
   http.end();
-// #define DEBUG_PHP
+
 #ifdef DEBUG_PHP
   Serial.printf("Payload: %s\n", response.c_str());
 #endif
@@ -373,8 +428,10 @@ void parseSensorsConnected(const String &sensorsConnected)
   Serial.printf("list of devices: %s", sensorsConnected.c_str()); // warning "\n" in sensorConnected string
 #endif
 
-  String deviceConn = sensorsConnected.substring(sensorsConnected.indexOf("|") + 1, sensorsConnected.lastIndexOf("|"));
+  String deviceConn = sensorsConnected.substring(sensorsConnected.indexOf("|") + 1,
+                                                 sensorsConnected.lastIndexOf("|"));
 
+  ipMap.clear(); // if sensor was removed (failed to connect) need to clear!!!!!
   for (int i = 0; i < numberOfRows; i++)
   {
     int index = deviceConn.indexOf(":");
@@ -382,7 +439,6 @@ void parseSensorsConnected(const String &sensorsConnected)
     int index2 = deviceConn.indexOf("|");
     String ip = deviceConn.substring(index + 1, index2);
     String sensorName = deviceConn.substring(index1 + 1, index);
-
     // Store the IP address in the map
     ipMap[sensorName.c_str()] = ip.c_str();
 #ifdef DEBUG
@@ -399,4 +455,138 @@ void parseSensorsConnected(const String &sensorsConnected)
     Serial.printf("device connect %s \n ", deviceConn.c_str());
 #endif
   } // end for
+}
+/**
+ * @brief Handles input from the Blynk terminal widget.
+ *
+ * This function is triggered whenever a string is sent to the virtual pin V42
+ * (configured as a terminal widget in the Blynk app). It reads the input string
+ * and logs it to the serial monitor for further processing.
+ *
+ * * Commands:
+ * - "refr": Resets sensor connection status, refreshes widgets, and resets
+ *           failure/recovery counters.
+ * - "test": Triggers a test interrupt by calling the `generateInterrupt` function.
+ * - "ping": Iterates through a map of IP addresses, checks server connectivity,
+ *           and sends the results back to the terminal widget on V42.
+ *
+ *
+ * @param param The parameter object containing the string sent to the terminal widget.
+ */
+BLYNK_WRITE(V42)
+{
+   if (!param.asString())
+  {
+    Serial.println("Invalid parameter received.");
+    return;
+  }
+  String input = param.asStr(); // Read the input string from the terminal
+  Serial.printf("Received from terminal: %s\n", input.c_str());
+
+  if (input.startsWith("reboot"))
+  {
+    Serial.println("Reboot command received. Restarting...");
+    queStat();
+    ESP.restart();
+  }
+  else if (input.startsWith("refr"))
+  {
+    lastSensorsConnected = "";
+    refreshWidgets();
+    failSocket = recoveredSocket = retry = 0;
+  }
+  else if (input.startsWith("ping"))
+  {
+    int dead, alive;
+    unsigned long start = millis();
+    char tmp[100], tmp1[100];
+   
+    for (const auto &pair : ipMap)
+    {
+      alive = dead = 0;
+      sprintf(tmp, "%s %s:\n", pair.first.c_str(), pair.second.c_str());
+      for (int j = 0; j < 4; j++)
+      {
+        if (isServerConnected(pair.second.c_str()))
+          alive++;
+        else
+          dead++;
+      }
+      sprintf(tmp1, "\t%d pass %d dead time: %lu ms\n", alive, dead, millis() - start);
+      strcat(tmp, tmp1);
+      Blynk.virtualWrite(V42, tmp);
+    }
+    sprintf(tmp,"%s\n", ipList);
+    start = millis();
+    alive = dead = 0;
+    for (int j = 0; j < 4; j++)
+    {
+      String sensorsConnected = performHttpGet(ipList);
+      if (sensorsConnected.isEmpty())
+        dead++;
+      else
+        alive++;
+    }
+    sprintf(tmp1, "\t%d pass %d dead time: %lu ms\n", alive, dead, millis() - start);
+    strcat(tmp, tmp1);
+    Blynk.virtualWrite(V42, tmp);
+  }
+  // else if (input.startsWith("test"))
+}
+
+void printUptime()
+{
+  unsigned long uptimeMillis = millis(); // Get uptime in milliseconds
+
+  // Calculate days, hours, minutes, and seconds
+  unsigned long seconds = uptimeMillis / 1000;
+  unsigned long minutes = seconds / 60;
+  unsigned long hours = minutes / 60;
+  unsigned long days = hours / 24;
+
+  seconds %= 60;
+  minutes %= 60;
+  hours %= 24;
+
+  // Print uptime to the serial monitor
+  Serial.printf("Uptime: %lu days, %lu hours, %lu minutes, %lu seconds\n", days, hours, minutes, seconds);
+}
+
+/**
+ * @brief Checks if a server is reachable by attempting to establish a connection.
+ *
+ * This function attempts to connect to a server using the specified IP address
+ * and port. If the connection is successful, it immediately closes the connection
+ * and returns true, indicating that the server is reachable. Otherwise, it returns
+ * false.
+ *
+ * @param serverIP The IP address of the server as a null-terminated string.
+ * @param port The port number of the server to connect to.
+ * @return true If the server is reachable.
+ * @return false If the server is not reachable.
+ */
+bool isServerConnected(const char *serverIP, uint16_t port)
+{
+  WiFiClient client;
+  if (client.connect(serverIP, port))
+  {
+    client.stop(); // Close the connection
+    return true;   // Server is reachable
+  }
+  return false; // Server is not reachable
+}
+/**
+ * @brief Simulates an interrupt by manually calling the ISR for testing purposes.
+ *
+ * This function disables interrupts, invokes the ISR manually, and then re-enables
+ * interrupts. It is useful for testing interrupt handling logic without relying on
+ * actual hardware interrupts.
+ *
+ */
+void generateInterrupt()
+{
+  Serial.println("Interrupt generated!");
+  noInterrupts(); // Disable interrupts
+  lwdtcb();       // Manually call the ISR for testing
+  interrupts();   // Re-enable interrupts
 }

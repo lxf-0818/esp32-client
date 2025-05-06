@@ -61,11 +61,11 @@
 #include <Wire.h>
 
 // Constants
-//#define DEBUG
+// #define DEBUG
 #define SOCKET_QUEUE_SIZE 2
 #define HTTP_QUEUE_SIZE 5
 #define TASK_STACK_SIZE 2048
-#define SOCKET_DELAY_MS 50 
+#define SOCKET_DELAY_MS 50
 #define HTTP_DELAY_MS 2000
 #define BLINK_DELAY_MS 1000
 #define LED_PIN 2
@@ -90,13 +90,12 @@ void taskSocketRecov(void *pvParameters);
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
 void taskBlink(void *pvParameters);
+void taskPing(void *pvParameters);
+
 bool queStat();
 int deleteRow(String phpScript);
 int socketClient(char *espServer, char *command, bool updateErrorQueue);
-#ifdef TEST
-void blynkTimeOn();
-void blynkTimeOff();
-#endif
+
 
 // Struct Definitions
 typedef struct
@@ -163,7 +162,11 @@ void initRTOS()
     xTaskCreatePinnedToCore(taskBlink, "Task Blink", TASK_STACK_SIZE, (uint32_t *)&blink_delay, 1, &blink_task_handle, 1);
     xTaskCreatePinnedToCore(taskSQL_HTTP, "Task HTTP", TASK_STACK_SIZE * 2, (uint32_t *)&http_delay, 2, &http_task_handle, 0);
     xTaskCreatePinnedToCore(taskSocketRecov, "Task Sockets", TASK_STACK_SIZE * 2, (uint32_t *)&socket_delay, 3, &socket_task_handle, 1);
+//  TaskHandle_t ping_task_handle;
+ 
 
+//     xTaskCreatePinnedToCore(taskPing,"Task Ping",4098,(void *)&PingParams,3,&ping_task_handle, 1);
+    
     if (blink_task_handle == NULL || socket_task_handle == NULL || http_task_handle == NULL)
     {
         Serial.println("tasks not running");
@@ -253,12 +256,10 @@ int socketRecovery(char *IP, char *cmd2Send)
  *   communication with the php server.
  * - The server URL and PHP script paths are hardcoded in the task.
  *
- * @warning
- * - Ensure that the queue (`QueHTTP_Handle`) and mutex (`xMutex_http`) are
- *   properly initialized before starting this task.
- * - The task assumes that the server is reachable at the specified IP address
- *   and that the PHP scripts are correctly configured.
+ *
  */
+
+
 void taskSQL_HTTP(void *pvParameters)
 {
     HTTPClient http;
@@ -279,10 +280,10 @@ void taskSQL_HTTP(void *pvParameters)
             if (ret == pdPASS)
             {
                 //  "take" blocks calls to esp restart while messages are on queue see queStat()
-                xSemaphoreTake(xMutex_http, 0);
+                xSemaphoreTake(xMutex_http, portMAX_DELAY);
                 http.begin(client_sql, serverName.c_str());
                 http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-               // delay(500);
+                // delay(500);
                 int httpResponseCode = http.POST(message.line);
                 if (httpResponseCode > 0)
                 {
@@ -347,7 +348,7 @@ void taskSocketRecov(void *pvParameters)
     socket_t socketQue;
     uint32_t socket_delay = *((uint32_t *)pvParameters);
     const TickType_t xDelay = socket_delay / portTICK_PERIOD_MS;
-    Serial.printf("Task Socket Recover running on CoreID:%d xDelay:%u ms Free Bytes:%d\n",
+    Serial.printf("Task Socket Recovery running on CoreID:%d xDelay:%u ms Free Bytes:%d\n",
                   (unsigned int)xPortGetCoreID(), (unsigned int)xDelay, uxTaskGetStackHighWaterMark(NULL) * WORDS_PER_BYTE);
     for (;;)
     {
@@ -357,7 +358,7 @@ void taskSocketRecov(void *pvParameters)
             {
                 //"take" blocks calls to esp restart when messages are on queue
                 // see queStat()
-                xSemaphoreTake(xMutex_sock, 0);
+                xSemaphoreTake(xMutex_sock, portMAX_DELAY);
                 vTaskDelay(xDelay);
                 retry++;
                 // Serial.printf("socket error %s %s \n", socketQue.ipAddr, socketQue.cmd);
@@ -365,7 +366,7 @@ void taskSocketRecov(void *pvParameters)
                 if (!x)
                 {
                     recoveredSocket++;
-                    Serial.printf("Recovered last network fail for host:%s cmd:%s \n", socketQue.ipAddr, socketQue.cmd);
+                    Serial.printf("Recovered last network fail for host:%s s \n", socketQue.ipAddr);
                     Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
                 }
                 else
@@ -426,7 +427,7 @@ void setupHTTP_request(String sensorName, float tokens[])
 
         strcpy(message.line, httpRequestData.c_str());
         message.key = tokens[3];
-        message.line[strlen(message.line)] = 0; // Add the terminating nul char4
+        message.line[strlen(message.line)] = 0; // Add the terminating null 
         int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0);
         if (ret == pdTRUE)
         {
@@ -491,11 +492,38 @@ bool queStat()
             return false;
         }
         Serial.println("Queues are busy...");
-        delay(1000);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
     }
+    Serial.println("Queues are clear...");
 
+    // if the tasks are running will do a non-block wait unit its done
     xSemaphoreTake(xMutex_sock, portMAX_DELAY);
     xSemaphoreTake(xMutex_http, portMAX_DELAY);
     Serial.println("All tasks complete");
     return true;
 }
+
+/**
+ * @brief Struct to hold parameters for the ping task.
+ */
+
+/**
+ * @brief Task to handle ping operations with two string parameters and return results to the caller.
+ *
+ * @param pvParameters Pointer to a struct containing two strings and a callback function.
+ */
+// void taskPing(void *pvParameters)
+// {
+//     PingParams *params = (PingParams *)pvParameters;
+
+//     Serial.printf("Ping Task started with param1: %s, param2: %s\n", params->param1.c_str(), params->param2.c_str());
+
+//     // Example usage of the parameters
+//     for (;;) {
+//         Serial.printf("Pinging with %s and %s...\n", params->param1.c_str(), params->param2.c_str());
+//         if (params->callback) {
+//             params->callback(params->param1, params->param2); // Return results via callback
+//         }
+//         vTaskDelay(1000 / portTICK_PERIOD_MS);
+//     }
+// }
