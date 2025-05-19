@@ -10,7 +10,7 @@
  * - The program uses Blynk for IoT communication and virtual pin updates.
  * - It fetches device information from a server and processes it for display and control.
  * - A loop watchdog timer (LWD) is implemented to reboot the system in case of a hang.
- * - The program supports updating widgets with sensor data and managing device connections.
+ * - The program supports updating widgets and the Blynk with sensor data and managing device connections.
  *
  * @dependencies
  * - Arduino core for ESP32
@@ -77,11 +77,12 @@
 //  #define TEMPV6 V6 // Define TEMPV6 as virtual pin V6
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SSD_ADDR 0x3c
+
 void initRTOS();
 void flashSSD();
 void refreshWidgets();
 void getBootTime(char *lastBook, char *strReason);
-void parseSensorsConnected(const String &sensorsConnected);
+void getSensorData(const String &sensorsConnected);
 String performHttpGet(const char *url);
 int decryptWifiCredentials(char *ssid, char *psw);
 int socketClient(char *espServer, char *command, bool updateErorrQue);
@@ -92,7 +93,7 @@ void ICACHE_RAM_ATTR lwdtcb(void);
 bool queStat();
 bool isServerConnected(const char *serverIP, uint16_t port = 8888);
 void generateInterrupt();
-void taskPing(void *pvParameters);
+void printUptime();
 
 std::map<std::string, std::string> ipMap;
 const uint16_t port = 8888;
@@ -130,7 +131,7 @@ void setup()
   else
     flashSSD();
 
-  //  Serial.println("Turned off timer");
+  // Serial.println("Turned off timer");
   timerID1 = timer.setInterval(1000L * 20, refreshWidgets); //
   initRTOS();
   lwdtFeed();
@@ -184,7 +185,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
     Serial.println("Failed to fetch sensors from mySQL or No devices connected to network");
     return;
   }
-  parseSensorsConnected(sensorsConnected);
+  getSensorData(sensorsConnected); //
 
   if (lastSensorsConnected != sensorsConnected)
   {
@@ -197,6 +198,7 @@ void refreshWidgets() // called every x seconds by SimpleTimer
     }
     lastSensorsConnected = sensorsConnected;
   }
+    printUptime();
 
   Blynk.virtualWrite(V7, passSocket);
   Blynk.virtualWrite(V20, failSocket);
@@ -223,6 +225,7 @@ BLYNK_CONNECTED()
   Blynk.virtualWrite(V20, failSocket);
   Blynk.virtualWrite(V19, recoveredSocket);
   Blynk.virtualWrite(V34, retry);
+  Blynk.virtualWrite(V39, "boot");
 
   String payload = performHttpGet(getRowCnt);
   if (payload.isEmpty())
@@ -232,10 +235,12 @@ BLYNK_CONNECTED()
   }
   else
   {
+    refreshWidgets(); //
     passSocket = payload.toInt();
+    Blynk.virtualWrite(V7, passSocket);
+
     Serial.printf("passSocket %d  \n", passSocket);
   }
-  refreshWidgets();
 }
 BLYNK_WRITE(V18)
 {
@@ -246,23 +251,6 @@ BLYNK_WRITE(V18)
     return;
   }
 }
-/**
- * @brief Handles incoming data from the Blynk virtual pin V42.
- *
- * This function is triggered whenever data is sent to the virtual pin V42
- * in the Blynk application. It processes the input string and performs
- * specific actions based on the command received.
- *
- * Commands:
- * - "refr": Resets sensor connection status, refreshes widgets, and resets
- *           failure/recovery counters.
- * - "test": Triggers a test interrupt by calling the `generateInterrupt` function.
- * - "ping": Iterates through a map of IP addresses, checks server connectivity,
- *           and sends the results back to the terminal widget on V42.
- *
- * @param param The parameter object containing the data sent to the virtual pin.
- *              The input is expected to be a string.
- */
 BLYNK_WRITE(BLINK_TST)
 {
   timer.disable(timerID1);
@@ -375,7 +363,7 @@ void upDateWidget(char *sensor, float tokens[])
  *
  * @note If the macro DEBUG_PHP is defined, the response payload will be printed to the Serial monitor.
  */
-//#define DEBUG_PHP
+// #define DEBUG_PHP
 String performHttpGet(const char *url)
 {
   http.begin(url);
@@ -389,7 +377,7 @@ String performHttpGet(const char *url)
   http.end();
 
 #ifdef DEBUG_PHP
-  Serial.printf("Payload: %s\n", response.c_str());
+  Serial.printf("url: %s Payload: %s\n", url, response.c_str());
 #endif
   return response;
 }
@@ -418,7 +406,7 @@ String performHttpGet(const char *url)
  *
  * @note If the `socketClient` function fails for a device, an error message is printed to the serial monitor.
  */
-void parseSensorsConnected(const String &sensorsConnected)
+void getSensorData(const String &sensorsConnected)
 {
 
   String rows = sensorsConnected.substring(0, sensorsConnected.indexOf("|"));
@@ -475,7 +463,7 @@ void parseSensorsConnected(const String &sensorsConnected)
  */
 BLYNK_WRITE(V42)
 {
-   if (!param.asString())
+  if (!param.asString())
   {
     Serial.println("Invalid parameter received.");
     return;
@@ -500,7 +488,7 @@ BLYNK_WRITE(V42)
     int dead, alive;
     unsigned long start = millis();
     char tmp[100], tmp1[100];
-   
+
     for (const auto &pair : ipMap)
     {
       alive = dead = 0;
@@ -516,9 +504,10 @@ BLYNK_WRITE(V42)
       strcat(tmp, tmp1);
       Blynk.virtualWrite(V42, tmp);
     }
-    sprintf(tmp,"%s\n", ipList);
+    sprintf(tmp, "%s\n", ipList);
     start = millis();
     alive = dead = 0;
+    start = millis();
     for (int j = 0; j < 4; j++)
     {
       String sensorsConnected = performHttpGet(ipList);
@@ -530,10 +519,16 @@ BLYNK_WRITE(V42)
     sprintf(tmp1, "\t%d pass %d dead time: %lu ms\n", alive, dead, millis() - start);
     strcat(tmp, tmp1);
     Blynk.virtualWrite(V42, tmp);
+    //   float tokens[5];
+    //   start = millis();
+    //   for (const auto &pair : ipMap)
+    //   {
+    //     setupHTTP_request(pair.second.c_str(), tokens);
+    //     Serial.printf("mySQL time %lu\n", millis() - start);
+    //   }
   }
   // else if (input.startsWith("test"))
 }
-
 void printUptime()
 {
   unsigned long uptimeMillis = millis(); // Get uptime in milliseconds

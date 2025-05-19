@@ -52,7 +52,7 @@ extern int failSocket, passSocket, recoveredSocket, retry;
 extern byte enc_iv_to[16], aes_iv[16];
 extern char cleartext[];
 void taskSQL_HTTP(void *pvParameters);
-void setupHTTP_request(String sensorName, float tokens[]);
+void setupHTTP_request(String sensorNbame, float tokens[]);
 int socketRecovery(char *IP, char *cmd2Send);
 int socketClient(char *espServer, char *command, bool updateErrorQueue);
 void upDateWidget(char *sensor, float tokens[]);
@@ -62,10 +62,11 @@ void decrypt_to_cleartext(char *msg, uint16_t msgLen, byte iv[], char *cleartext
 
 /**
  * @brief Establishes a socket connection to a server, sends a command, and processes the response.
- * 
+ *
  * @param espServer A pointer to a character array containing the server address.
  * @param command A pointer to a character array containing the command to send to the server.
- * @param updateErrorQueue A boolean flag indicating whether to update the error recovery queue in case of failure.
+ * @param updateErrorQueue A boolean flag indicating whether to update the error recovery queue
+ * in case of failure.
  *
  * @return int Returns:
  *         - 0 on success.
@@ -178,7 +179,7 @@ int socketClient(char *espServer, char *command, bool updateErrorQueue)
     printTokens(tokens);
 #endif
     processSensorData(tokens, updateErrorQueue);
-
+    passSocket++;
     return 0;
 }
 /**
@@ -208,8 +209,7 @@ void processSensorData(float tokens[5][5], bool updateErrorQueue)
             {58, "BMP280"},
             {44, "SHT35"},
             {48, "ADS1115"},
-            {28, "DS1"}
-        }; 
+            {28, "DS1"}};
 
     char sensor[10];
 
@@ -220,7 +220,6 @@ void processSensorData(float tokens[5][5], bool updateErrorQueue)
         if (it != sensorMap.end())
         {
             strcpy(sensor, it->second);
-            passSocket++;
             setupHTTP_request(sensor, tokens[i]);
             upDateWidget(sensor, tokens[i]);
         }

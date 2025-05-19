@@ -40,7 +40,7 @@
  *   - `taskSQL_HTTP`: Processes HTTP POST requests from the queue.
  *   - `setupHTTP_request`: Prepares and enqueues an HTTP POST request.
  *   - `taskBlink`: Toggles the built-in LED at regular intervals.
- *   - `queStat`: Checks the status of queues and ensures all tasks are complete.
+ *   - `queStat`: Checks the status of queues and ensures all tasks are complete before restart .
  *   - `deleteRow`: Deletes a row from the database using a PHP script.
  *   - `socketClient`: Sends a command to a server via a socket connection.
  *
@@ -66,7 +66,7 @@
 #define HTTP_QUEUE_SIZE 5
 #define TASK_STACK_SIZE 2048
 #define SOCKET_DELAY_MS 50
-#define HTTP_DELAY_MS 2000
+#define HTTP_DELAY_MS 20
 #define BLINK_DELAY_MS 1000
 #define LED_PIN 2
 #define NO_UPDATE_FAIL 0
@@ -90,13 +90,11 @@ void taskSocketRecov(void *pvParameters);
 void taskSQL_HTTP(void *pvParameters);
 void setupHTTP_request(String sensorName, float tokens[]);
 void taskBlink(void *pvParameters);
-void taskPing(void *pvParameters);
+//void taskPing(void *pvParameters);
 
 bool queStat();
 int deleteRow(String phpScript);
 int socketClient(char *espServer, char *command, bool updateErrorQueue);
-
-
 // Struct Definitions
 typedef struct
 {
@@ -162,11 +160,10 @@ void initRTOS()
     xTaskCreatePinnedToCore(taskBlink, "Task Blink", TASK_STACK_SIZE, (uint32_t *)&blink_delay, 1, &blink_task_handle, 1);
     xTaskCreatePinnedToCore(taskSQL_HTTP, "Task HTTP", TASK_STACK_SIZE * 2, (uint32_t *)&http_delay, 2, &http_task_handle, 0);
     xTaskCreatePinnedToCore(taskSocketRecov, "Task Sockets", TASK_STACK_SIZE * 2, (uint32_t *)&socket_delay, 3, &socket_task_handle, 1);
-//  TaskHandle_t ping_task_handle;
- 
+    //  TaskHandle_t ping_task_handle;
 
-//     xTaskCreatePinnedToCore(taskPing,"Task Ping",4098,(void *)&PingParams,3,&ping_task_handle, 1);
-    
+    //     xTaskCreatePinnedToCore(taskPing,"Task Ping",4098,(void *)&PingParams,3,&ping_task_handle, 1);
+
     if (blink_task_handle == NULL || socket_task_handle == NULL || http_task_handle == NULL)
     {
         Serial.println("tasks not running");
@@ -230,8 +227,7 @@ int socketRecovery(char *IP, char *cmd2Send)
  * @brief Task to log sensor data to a MySQL database using HTTP POST requests.
  *
  * This FreeRTOS task is designed to run on core 0 to handle HTTP operations,
- * which are relatively slow (0.5 to 2 seconds per POST), allowing core 1 to
- * handle real-time operations. The task retrieves messages from a queue,
+ * allowing core 1 to  handle real-time operations. The task retrieves messages from a queue,
  * sends them to a server via HTTP POST, and handles errors by attempting
  * to delete the corresponding row in the database if the POST fails.
  *
@@ -255,10 +251,7 @@ int socketRecovery(char *IP, char *cmd2Send)
  * - The HTTP client (`HTTPClient`) and WiFi client (`WiFiClient`) are used for
  *   communication with the php server.
  * - The server URL and PHP script paths are hardcoded in the task.
- *
- *
  */
-
 
 void taskSQL_HTTP(void *pvParameters)
 {
@@ -283,12 +276,12 @@ void taskSQL_HTTP(void *pvParameters)
                 xSemaphoreTake(xMutex_http, portMAX_DELAY);
                 http.begin(client_sql, serverName.c_str());
                 http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-                // delay(500);
                 int httpResponseCode = http.POST(message.line);
                 if (httpResponseCode > 0)
                 {
                     passPost++;
                     String payload = http.getString();
+                 //   Serial.printf("http response %s\n", payload.c_str());
                 }
                 else
                 {
@@ -298,7 +291,7 @@ void taskSQL_HTTP(void *pvParameters)
                     int j = 0, rc = 0;
                     while (1)
                     {
-                        vTaskDelay(xDelay); // http is slow wait (non-blocking other task won't be affected)
+                        vTaskDelay(xDelay); //  non-blocking other task won't be affected
                         rc = deleteRow(phpScript);
                         if (rc || j++ == MAX_RETRY)
                             break; //
@@ -358,7 +351,7 @@ void taskSocketRecov(void *pvParameters)
             {
                 //"take" blocks calls to esp restart when messages are on queue
                 // see queStat()
-                xSemaphoreTake(xMutex_sock, portMAX_DELAY);
+                xSemaphoreTake(xMutex_sock, 0);
                 vTaskDelay(xDelay);
                 retry++;
                 // Serial.printf("socket error %s %s \n", socketQue.ipAddr, socketQue.cmd);
@@ -366,7 +359,7 @@ void taskSocketRecov(void *pvParameters)
                 if (!x)
                 {
                     recoveredSocket++;
-                    Serial.printf("Recovered last network fail for host:%s s \n", socketQue.ipAddr);
+                    Serial.printf("Recovered last network fail for host:%s \n", socketQue.ipAddr);
                     Serial.printf("passSocket %d failSocket %d  recovered %d retry %d \n", passSocket, failSocket, recoveredSocket, retry);
                 }
                 else
@@ -427,7 +420,7 @@ void setupHTTP_request(String sensorName, float tokens[])
 
         strcpy(message.line, httpRequestData.c_str());
         message.key = tokens[3];
-        message.line[strlen(message.line)] = 0; // Add the terminating null 
+        message.line[strlen(message.line)] = 0; // Add the terminating null
         int ret = xQueueSend(QueHTTP_Handle, (void *)&message, 0);
         if (ret == pdTRUE)
         {
@@ -474,7 +467,8 @@ void taskBlink(void *pvParameters)
  * This function monitors the message count of two queues (`QueSocket_Handle` and
  * `QueHTTP_Handle`) and waits until both are empty. If the queues are not empty
  * within a 5-second timeout, the function logs a timeout message and returns false.
- * Otherwise, it takes two mutexes (`xMutex_sock` and `xMutex_http`) to ensure
+ * Otherwise, it takes two mutexes (`xMutex_s
+ * ock` and `xMutex_http`) to ensure
  * exclusive access and logs a completion message before returning true.
  *
  * @return true If both queues are empty and the mutexes are successfully taken.
@@ -492,7 +486,7 @@ bool queStat()
             return false;
         }
         Serial.println("Queues are busy...");
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
     Serial.println("Queues are clear...");
 
